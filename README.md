@@ -1,4 +1,4 @@
-# 100-TIMES-AI-MANGA-DRAWING
+# 100 TIMES AI MANGA DRAWING
 
 <img width="604" height="281" alt="スクリーンショット 2026-03-07 9 36 01" src="https://github.com/user-attachments/assets/8454abc8-dc4c-4476-9b1c-2c1e1606af51" />
 
