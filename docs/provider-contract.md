@@ -1,6 +1,6 @@
 # プロバイダー契約
 
-既定はmock。I15でGemini接続コードとSDKを使うオフライン契約試験を追加した。実アカウントへの送信、実応答との照合、実作画品質、T14は未検証。
+既定はmock。I15でGemini接続コードとSDKを使うオフライン契約試験を追加した。実アカウントでモデル情報取得・ファイルuploadは成功、Batch createはHTTP400で拒否。結果取り込み・実作画品質・T14は未検証。
 
 ## ローカル契約
 
@@ -27,7 +27,7 @@
 
 ## Gemini接続
 
-`providers/gemini.py`はgoogle-genai 2.31.0の公開APIを使う。入力画像をinlineDataとしてJSONLに固定し、Files upload → native Batch create → poll → 結果ファイルのストリーム取得を行う。モデルは`gemini-3-pro-image`、2K・3:4・1要求1画像。実アカウントのモデル提供状況は未確認。
+`providers/gemini.py`はgoogle-genai 2.31.0の公開APIを使う。入力画像をinlineDataとしてJSONLに固定し、Files upload → native Batch create → poll → 結果ファイルのストリーム取得を行う。モデルは`gemini-3-pro-image`、2K・3:4・1要求1画像。モデル情報取得で提供とBatch対応を確認済み。実生成は前提条件エラーで未成功。
 
 SDKの自動再試行は無効。429は明示拒否として待機し、送信応答喪失はunknownとして照合する。照合ゼロ件から未送信と断定しない。アップロードの事前障害は最大3回で停止する。ネットワーク待機中はDB書込ロックを保持しない。
 

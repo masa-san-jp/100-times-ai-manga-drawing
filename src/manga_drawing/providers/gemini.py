@@ -30,6 +30,24 @@ class ProviderRejected(Exception):
         super().__init__(code)
 
 
+def rejection_code(exc):
+    """Retain an allowlisted diagnosis, never arbitrary SDK messages or credentials."""
+    text = str(getattr(exc, "message", "") or "").lower()
+    reason = ""
+    for label, fragments in (
+        ("billing", ("billing", "paid tier", "free tier")),
+        ("mime_type", ("mime type", "mime_type", "mimetype")),
+        ("input_format", ("jsonl", "json line", "generation_config", "generationconfig")),
+        ("quota", ("quota", "rate limit")),
+        ("api_key", ("api key", "api_key")),
+        ("precondition", ("precondition",)),
+    ):
+        if any(fragment in text for fragment in fragments):
+            reason = "_" + label
+            break
+    return "gemini_rejected_" + str(exc.code) + reason
+
+
 def ensure_configured(cfg):
     if not (
         cfg.enable_live and cfg.gemini_api_key and cfg.live_request_limit > 0 and cfg.live_unit_micro > 0
@@ -115,7 +133,7 @@ class GeminiProvider:
                         )
                     request = {
                         "contents": [{"role": "user", "parts": parts}],
-                        "generationConfig": {
+                        "generation_config": {
                             "responseModalities": ["TEXT", "IMAGE"],
                             "candidateCount": 1,
                             "maxOutputTokens": 8192,
@@ -147,7 +165,7 @@ class GeminiProvider:
     def upload(self, path):
         try:
             uploaded = self.client.files.upload(
-                file=path, config={"mime_type": "application/jsonl", "display_name": path.stem}
+                file=path, config={"mime_type": "jsonl", "display_name": path.stem}
             )
             return safe_resource(uploaded.name, "files")
         except Exception:
@@ -170,7 +188,7 @@ class GeminiProvider:
             if code == 429:
                 raise RateLimited() from None
             if code in (400, 401, 403, 404):
-                raise ProviderRejected("gemini_rejected_" + str(code)) from None
+                raise ProviderRejected(rejection_code(exc)) from None
             raise SubmissionUnknown() from None
 
     def find(self, display_key):

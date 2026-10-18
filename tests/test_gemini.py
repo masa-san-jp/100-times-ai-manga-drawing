@@ -36,6 +36,7 @@ class FakeGoogle:
         self.batches = SimpleNamespace(create=self.create, get=self.get, list=self.list)
 
     def upload(self, *, file, config):
+        assert config["mime_type"] == "jsonl"
         name = "files/input-" + str(len(self.inputs))
         self.inputs[name] = Path(file).read_text()
         return SimpleNamespace(name=name)
@@ -156,7 +157,7 @@ def test_offline_sdk_protocol_and_full_pipeline(live, tmp_path, clock):
         assert provider.describe("batches/job-0")["model"] == MODEL
         request = json.loads(next(iter(fake.inputs.values())).splitlines()[0])
         assert "snapshot" not in request
-        assert request["request"]["generationConfig"]["imageConfig"] == {
+        assert request["request"]["generation_config"]["imageConfig"] == {
             "aspectRatio": "3:4",
             "imageSize": "2K",
         }
@@ -366,3 +367,32 @@ def test_cumulative_limit_wait_is_visible_and_heartbeat_is_independent(live, tmp
     h = health(cfg)
     assert h["worker_running"] and h["live_remaining_requests"] == 1
     assert h["live_limit_wait"] and h["live_queued_requests"] == 2
+
+
+@pytest.mark.parametrize(
+    "message,suffix",
+    [
+        ("Billing account required secret-token", "billing"),
+        ("Unsupported MIME type secret-token", "mime_type"),
+        ("Invalid JSONL generationConfig secret-token", "input_format"),
+        ("Precondition check failed. secret-token", "precondition"),
+        ("Unknown problem secret-token", ""),
+    ],
+)
+def test_rejection_diagnosis_is_allowlisted(live, message, suffix):
+    _, fake, provider = live
+
+    class Failure(Exception):
+        code = 400
+
+    exc = Failure()
+    exc.message = message
+
+    def fail(**kwargs):
+        raise exc
+
+    fake.batches.create = fail
+    with pytest.raises(ProviderRejected) as result:
+        provider.submit("files/input", MODEL, "correlation")
+    assert result.value.code == "gemini_rejected_400" + ("_" + suffix if suffix else "")
+    assert "secret-token" not in str(result.value)
