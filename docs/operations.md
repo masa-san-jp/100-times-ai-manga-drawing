@@ -93,7 +93,7 @@ uv run python scripts/benchmark.py
 | MANGA_LIVE_BUDGET_PER_IMAGE_USD | 画像1枚に見込む費用。米ドル額をそのまま入力（例：0.10） |
 | MANGA_DATA_DIR | 保存先。mockとは別の専用ディレクトリーを推奨 |
 
-上限・予算単位の値をアプリが推測して実送信することはない。初回live検証は少数の要求と明示した予算で行い、実schema・出力・利用明細を照合する。現時点でその検証は未実施。
+上限・予算単位の値をアプリが推測して実送信することはない。初回live検証は少数の要求と明示した予算で行い、実schema・出力・利用明細を照合する。この開発環境での初回2＋修正1の機能試験は成功済み。作者による品質採否と実請求明細の照合は別途。[結果](live-acceptance-report.md)を参照。
 
 要求上限は日次やバッチごとではなくDATA_DIR単位の累積値。Geminiの送信前の確定失敗と、native Batch createで未受理と確定した400/401/403/404/429は、要求枠とバッチの予算予約を返却する。返却は失敗確定と同じtransactionで一度だけ行い、監査記録と失敗履歴を残す。受理済みの要求とunknownは予約を保持する。画面の残数は予約可能数であり成功画像数ではない。複数バッチの合計が上限に達すると待機し、上限縮小後の準備済みチャンクも停止する。
 
@@ -104,7 +104,7 @@ uv run python scripts/benchmark.py
 
 ### 設定場所と確認
 
-macOSの本作業環境では`/Users/masa/マイドライブ/Dev/100-times-ai-manga-drawing/.env`に記入する。ローカルの記入用ファイルは作成済み。キーと画像1枚に見込むドル額の2項目が空欄で、要求上限はT14用の3、保存先は`.data/live-acceptance`に設定している。
+macOSの本作業環境では`/Users/masa/マイドライブ/Dev/100-times-ai-manga-drawing/.env`に記入する。ローカルの記入用ファイルは作成済み。テンプレートではキーと画像1枚に見込むドル額の2項目が空欄。要求上限はT14用の3、保存先は`.data/live-acceptance`。本作業環境の.envはユーザー設定済みで、その内容はGitへ含めない。
 
 ```sh
 # リポジトリ直下で実行する。初めて設定ファイルを用意する環境だけコピー。
@@ -134,3 +134,18 @@ uv run --extra gemini manga live-check
 `live-check`やモデル情報取得の成功は、支払い設定の完了を意味しない。Google AI Studioの「プロジェクト」で、利用キーのプロジェクトが無料枠のままになっていないか確認する。Gemini 3 Pro Imageの無料枠は[公式料金表](https://ai.google.dev/gemini-api/docs/pricing#gemini-3-pro-image)で提供されていない。
 
 認証・課金などによるHTTP400の拒否は自動再送しない。未受理の要求枠は返却するため、外部条件を解消した後は元の上限のまま再試験できる。旧バージョンが保持した明確な拒否の予約も、worker起動時に一度だけ回復する。失敗履歴は削除せず、単にカウンター全体をゼロにする操作はしない。unknownや受理後の失敗は返却対象にしない。
+
+
+### 合成資料によるライブ受入試験の継続
+
+`scripts/live_acceptance_flow.py`は、この開発環境の`artifacts/live-acceptance.json`に記録済みの初回2ページバッチを対象にする継続用ユーティリティ。一般の作品を自動採用する機能ではない。通常のworkerと同じ`.env`で起動する。
+
+```sh
+uv run --extra gemini python scripts/live_acceptance_flow.py
+```
+
+対象の作品・バッチ・ページ・providerを照合し、合成資料の初回2枚が回収できたら、ページ1の採用を固定し、ページ2だけ修正して1要求を登録する。API呼出しは通常workerに任せ、元の上限3を維持する。試験用の採用操作は作者の画質判定を代行せず、結果にも`author_quality_review=pending`を残す。
+
+修正後はページ1の採用ID・画像hash不変と、最終2ページの候補ID・hashに一致するZIPを確認する。別作品や古い書き出しは使わない。record保存と固定操作キーで再起動時の重複生成を防ぎ、failed/unknownでは停止する。workerを再起動する場合も同じ保存先を使い、バッチを新規登録し直さない。
+
+この作業環境の実API画面は`http://127.0.0.1:8766/`（`manga web --port 8766`）、既存モック画面は8765番。両者は別の保存先を使う。live試験の成功3要求は予約を消費済みであり、未受理拒否の返却とは区別する。

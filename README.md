@@ -49,12 +49,13 @@ uv run manga web
  
 ## 仕様と実装計画
 
-モック版のアプリケーションを実装しました。Gemini接続コードも追加しましたが、実APIでの動作・作画品質は未検証です。下書きの試験画像でバッチ処理・採否・修正再生成を確認できます。
+モック版のアプリケーションを実装しました。Geminiの実APIでも、2ページの一括生成と1ページだけの修正再生成、採用結果の保持、ZIP出力を検証しました。作画品質の採否は作者が行います。下書きの試験画像でバッチ処理・採否・修正再生成を確認できます。
 
 - [起動と運用手順](docs/operations.md)
 - [実装結果とIssue別の状態](docs/implementation-status.md)
 - [受け入れ結果](docs/acceptance-report.md)
-- [Gemini接続の実装・オフライン検証](docs/gemini-acceptance.md)
+- [Gemini接続の実装・検証経緯](docs/gemini-acceptance.md)
+- [実APIによる少数ページの検証結果](docs/live-acceptance-report.md)
 - [独立した実装レビュー](docs/implementation-review.md)
 - [実装担当者への引き継ぎ](docs/implementation-handoff.md)
 - [仕様設計の骨子](docs/software-design.md)
@@ -68,7 +69,7 @@ uv run manga web
 
 ## 技術的背景
 
-このリポジトリには制作方法と原稿草案に加えて、ローカルで動く下書き生成パイプラインのモック版を収録しています。[Claude版草案](docs/claude-draft.md) では、人間のネーム、レイアウト指示、キャラクターデザインシート、プロンプトを組み合わせて画像生成へ渡す方法を説明しています。[Gemini版草案](docs/gemini-draft.md) とあわせ、草案の記述と公開済み成果物を区別して読んでください。
+このリポジトリには制作方法と原稿草案に加えて、ローカルで動く下書き生成パイプラインと、模擬API・Gemini接続を収録しています。[Claude版草案](docs/claude-draft.md) では、人間のネーム、レイアウト指示、キャラクターデザインシート、プロンプトを組み合わせて画像生成へ渡す方法を説明しています。[Gemini版草案](docs/gemini-draft.md) とあわせ、草案の記述と公開済み成果物を区別して読んでください。
 
 ## 歴史的背景と展開
 
