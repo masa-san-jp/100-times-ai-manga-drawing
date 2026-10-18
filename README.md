@@ -33,14 +33,6 @@
 - [note版「100 TIMES AI MANGA DRAWING」を読む](https://note.com/masa_san_jp/n/n21a5c02f496f)
   - 公開：2026年3月7日
  
-## Task
-
-- [x] 冊子版「100 TIMES AI MANGA DRAWING」
-- [x] note版「100 TIMES AI MANGA DRAWING」
-- [ ] 英語版「100 TIMES AI MANGA DRAWING」
-- [ ] Portfolio掲載
-
-
 ## 用語としての用例
 
 「100 TIMES AI MANGA DRAWING の工程整理を使い、ネームと作画指示を分けて下描きを試す」のように、マンガ制作へ生成AIを組み込むワークフローを指します。「100倍」は本企画のテーマであり、すべての工程・環境に対する性能保証ではありません。
