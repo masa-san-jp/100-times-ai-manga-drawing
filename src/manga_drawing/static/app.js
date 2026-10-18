@@ -150,7 +150,19 @@ async function pagesScreen() {
   action('select-filter',async()=>{let cursor=0;do{const r=await api(`/api/projects/${state.project}/pages?limit=100&cursor=${cursor}&status=${$('filter').value}`);r.items.forEach(p=>selected.add(p.id));cursor=r.next_cursor;}while(cursor);await load();});
   action('load-more',()=>load(false,true));
   action('generate',()=>generate('initial'));action('regenerate',()=>generate('revision'));action('generate-extra',()=>generate('extra'));
-  async function exportPages(mode){const progress=await api(`/api/projects/${state.project}/progress`);const result=await api(`/api/projects/${state.project}/exports`,'POST',{mode,expected_version:progress.project_version});$('export-status').textContent='書き出し中…';const interval=setInterval(async()=>{try{const e=await api(`/api/exports/${result.export_id}`);if(e.state==='complete'){clearInterval(interval);const a=node('a','ZIPをダウンロード');a.href=e.download_url;$('export-status').replaceChildren(a);}else if(e.state==='failed'){clearInterval(interval);notice('書き出しに失敗しました。画像の状態を確認してください。');}}catch(e){clearInterval(interval);notice(e.message);}},1000);}
+  function showExportFolder(result) {
+    const button=node('button','画像フォルダーを開く','secondary');
+    button.addEventListener('click',async()=>{
+      button.disabled=true;
+      try {await api(result.open_url,'POST');notice('画像フォルダーを開きました。');}
+      catch(error){notice(error.message);}finally{button.disabled=false;}
+    });
+    const path=node('p',result.folder_path,'muted');
+    $('export-status').replaceChildren(button,path);
+  }
+  const previousExport=$('export-status').dataset.exportId;
+  if(previousExport){try{showExportFolder(await api(`/api/exports/${previousExport}`));}catch(error){notice(error.message);}}
+  async function exportPages(mode){const progress=await api(`/api/projects/${state.project}/progress`);const result=await api(`/api/projects/${state.project}/exports`,'POST',{mode,expected_version:progress.project_version});$('export-status').textContent='書き出し中…';const interval=setInterval(async()=>{try{const e=await api(`/api/exports/${result.export_id}`);if(e.state==='complete'){clearInterval(interval);showExportFolder(e);}else if(e.state==='failed'){clearInterval(interval);notice('書き出しに失敗しました。画像の状態を確認してください。');}}catch(e){clearInterval(interval);notice(e.message);}},1000);}
   action('export-all',()=>exportPages('complete'));action('export-partial',()=>exportPages('accepted_only'));
   await refresh();return refresh;
 }

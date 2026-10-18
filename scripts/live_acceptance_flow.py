@@ -10,7 +10,6 @@ import hashlib
 import json
 from pathlib import Path
 import time
-import zipfile
 
 from PIL import Image
 
@@ -18,7 +17,7 @@ from manga_drawing import assets, planning
 from manga_drawing.common import atomic_write, canonical, require, timestamp
 from manga_drawing.config import Config
 from manga_drawing.db import connect, get
-from manga_drawing.export import schedule
+from manga_drawing.export import schedule, output_folder
 
 RECORD = Path("artifacts/live-acceptance.json")
 
@@ -91,27 +90,26 @@ def matching_manifest(db, pid, manifest):
     )
 
 
-def verify_archive(cfg, output):
+def verify_directory(cfg, output):
     manifest = json.loads(output["manifest_json"])
-    with zipfile.ZipFile(cfg.root / output["archive_path"]) as archive:
-        require(
-            json.loads(archive.read("manifest.json")) == manifest,
-            "test_export",
-            "ZIPのmanifestが一致しません。",
-        )
-        require(
-            archive.namelist() == ["pages/0001.png", "pages/0002.png", "manifest.json"],
-            "test_export",
-            "ZIPのページ構成が一致しません。",
-        )
-        for number in (1, 2):
-            with archive.open(f"pages/{number:04}.png") as source:
-                with Image.open(source) as image:
-                    require(
-                        image.mode == "L" and image.size == (manifest["width"], manifest["height"]),
-                        "test_export",
-                        "書き出しの色または寸法が一致しません。",
-                    )
+    folder = output_folder(cfg, output)
+    require(
+        json.loads((folder.parent / "manifest.json").read_text()) == manifest,
+        "test_export",
+        "出力のmanifestが一致しません。",
+    )
+    require(
+        sorted(p.name for p in folder.iterdir()) == ["0001.png", "0002.png"],
+        "test_export",
+        "出力ページの構成が一致しません。",
+    )
+    for number in (1, 2):
+        with Image.open(folder / f"{number:04}.png") as image:
+            require(
+                image.mode == "L" and image.size == (manifest["width"], manifest["height"]),
+                "test_export",
+                "書き出しの色または寸法が一致しません。",
+            )
 
 
 def accept_fixture(cfg, candidate):
@@ -236,12 +234,12 @@ def advance_once(cfg, path=RECORD):
         return "waiting_revision"
     accept_fixture(cfg, revised[0])
     with connect(cfg) as db:
-        # Reuse only a snapshot of these exact final adopted pages, never an older ZIP.
+        # Reuse only a snapshot of these exact final adopted pages, never an older output.
         prior = next(
             (
                 r
                 for r in db.execute(
-                    "SELECT * FROM exports WHERE project_id=? AND state!='failed' ORDER BY created_at DESC",
+                    "SELECT * FROM exports WHERE project_id=? AND state!='failed' AND (archive_path IS NULL OR archive_path NOT LIKE '%.zip') ORDER BY created_at DESC",
                     (record["project_id"],),
                 )
                 if matching_manifest(db, record["project_id"], json.loads(r["manifest_json"]))
@@ -268,7 +266,7 @@ def advance_once(cfg, path=RECORD):
             "test_export",
             "最終採用と書き出しが一致しません。",
         )
-        verify_archive(cfg, output)
+        verify_directory(cfg, output)
         accepted_attempts = [
             dict(r)
             for r in db.execute(
@@ -307,7 +305,7 @@ def advance_once(cfg, path=RECORD):
             "baseline_unchanged": True,
             "author_quality_review": "pending",
             "accepted_attempts": accepted_attempts,
-            "export_path": str(cfg.root / output["archive_path"]),
+            "export_path": str(output_folder(cfg, output)),
         }
     )
     save(path, record)

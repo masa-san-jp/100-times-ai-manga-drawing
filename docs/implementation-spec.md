@@ -281,7 +281,7 @@ raw responseは秘密情報を除いたローカル結果ファイルとして�
 | PATCH /api/batches/{id}/budget | expected budget、new cap。増枠を記録 |
 | POST /api/chunks/{id}/resolve | reconcile/attach/resend/refetch、expected state、Idempotency-Key。resendにはexplicit_duplicate_risk=true |
 | GET /api/projects/{id}/progress | 件数、各batch、heartbeat、更新version。送信プロンプト全文を毎回返さない |
-| POST /api/projects/{id}/exports | mode=complete/accepted_only、expected project version。採用スナップショットからZIPを作る |
+| POST /api/projects/{id}/exports | mode=complete/accepted_only、expected project version。採用スナップショットから通常の画像フォルダーを作る |
 | GET /api/exports/{id} | stateと同一オリジンのdownload URL |
 | GET /api/assets/{hash} | DBにあるassetのみ。任意パスは受けない |
 
@@ -307,9 +307,9 @@ raw responseは秘密情報を除いたローカル結果ファイルとして�
 
 ## 11 書き出しと運用
 
-書き出し開始時に採用候補、ページ順、寸法を固定する。実行中に採用が変わっても内容を混ぜない。completeは全ページ採用が必要で不足時422、accepted_onlyは採用分と不足一覧を明示する。ZIP内はpages/0001.png、manifest.jsonとする。manifestにcandidate ID、round ID、元画像hash、変換方法、欠落ページを記録し、秘密情報を入れない。
+書き出し開始時に採用候補、ページ順、寸法を固定する。実行中に採用が変わっても内容を混ぜない。completeは全ページ採用が必要で不足時422、accepted_onlyは採用分と不足一覧を明示する。出力フォルダー内はpages/0001.png、manifest.jsonとする。ユーザーはpagesフォルダーを直接開いてPNGを利用する。manifestにcandidate ID、round ID、元画像hash、変換方法、欠落ページを記録し、秘密情報を入れない。
 
-ZIPはtempへストリーミングし、完成後に公開する。Web要求はexportをDBに登録して202を返し、ワーカーがチャンク処理の間に実行する。1個のZIPを丸ごとメモリに保持しない。
+専用の一時フォルダーへ1ページずつ保存し、全ページ完成後にフォルダーを公開する。Web要求はexportをDBに登録して202を返し、ワーカーが処理する。完了画面には画像フォルダーを開くボタンと保存先を表示し、再読み込み後も直近の出力先を開ける。フォルダーを開くPOSTは既存のCSRF保護を使い、任意パスではなく該当exportのpagesフォルダーだけを対象にする。
 
 バックアップはワーカーの新規操作を止め、進行中の取り込みとimport commitを待ち、アプリ全体の書き込みロック下でSQLite backup APIと参照ファイルをコピーする。mock-providerのDB、inputs、outputs、scenario、時計状態もバックアップ対象に含める。模擬APIの状態更新も同じアプリ書き込みロックを取得し、ロック順はアプリ書き込みロック→mock DB transactionで統一する。バックアップ中はこのロック下で本体DBとmock DBをそれぞれbackup APIで取得し、参照ファイルをコピーする。ローカル模擬APIは別プロセスで勝手に更新せず、poll時に保存済みready_atから結果を確定する。ネットワーク結果を待って無期限に止めず、バックアップ中は外部結果を次tickまで保留する。復元はWebとワーカーを停止して実施し、doctorで整合を確認する。DB単独のコピーを完全バックアップと呼ばない。
 

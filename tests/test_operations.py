@@ -3,7 +3,6 @@ import json
 import os
 import subprocess
 import sys
-import zipfile
 
 from PIL import Image
 import pytest
@@ -55,15 +54,16 @@ def test_backup_restore_and_export(cfg, tmp_path, clock):
     process_export(other)
     with connect(other) as db:
         out = get(db, "exports", result["export_id"])
-    with zipfile.ZipFile(other.root / out["archive_path"]) as z:
-        manifest = json.loads(z.read("manifest.json"))
-        assert manifest["missing_pages"] == [2]
-        assert manifest["provider"] == "mock"
-        assert manifest["pages"][0]["candidate_id"] == candidate["id"]
-        with z.open("pages/0001.png") as f:
-            im = Image.open(f)
-            assert im.mode == "L" and im.size == (1410, 1920)
-            assert im.getpixel((0, 0)) == 255
+    folder = other.root / out["archive_path"]
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["missing_pages"] == [2]
+    assert manifest["provider"] == "mock"
+    assert manifest["pages"][0]["candidate_id"] == candidate["id"]
+    assert [p.name for p in (folder / "pages").iterdir()] == ["0001.png"]
+    with Image.open(folder / "pages/0001.png") as im:
+        assert im.mode == "L" and im.size == (1410, 1920)
+        assert im.getpixel((0, 0)) == 255
+    assert not list((other.root / "exports").glob("*.zip"))
     assert Worker(other, clock).provider.call_count() == 1
     assert page_rows(other, pid)[0]["accepted_candidate_id"] == candidate["id"]
 
@@ -237,3 +237,82 @@ Worker(Config(Path(sys.argv[1]))).run()
     finally:
         child.terminate()
         child.wait(timeout=5)
+
+
+def test_folder_export_open_button_and_reloaded_history(cfg, client, tmp_path, clock, monkeypatch):
+    from manga_drawing import export as outputs
+
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    accept_first(cfg, pid)
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+    response = client.post(
+        f"/api/projects/{pid}/exports", json={"mode": "complete", "expected_version": version}
+    )
+    eid = response.json()["data"]["export_id"]
+    assert client.post(f"/api/exports/{eid}/open").status_code == 409
+    process_export(cfg)
+    result = client.get(f"/api/exports/{eid}").json()["data"]
+    folder = cfg.root / "exports" / eid / "pages"
+    assert result["folder_path"] == str(folder) and folder.is_dir()
+    assert "download_url" not in result
+    opened = []
+    monkeypatch.setattr(outputs.subprocess, "run", lambda args, **kwargs: opened.append(args))
+    assert client.post(result["open_url"]).status_code == 200
+    assert opened[0][-1] == str(folder)  # Fixed argument vector, never a shell command.
+    assert client.get(f"/api/exports/{eid}/download").status_code == 409
+    html = client.get(f"/projects/{pid}").text
+    assert f'data-export-id="{eid}"' in html and "ZIP" not in html
+
+
+def test_failed_folder_export_does_not_publish_partial_pages(cfg, tmp_path, clock, monkeypatch):
+    from manga_drawing import export as outputs
+
+    pid, _ = make_project(cfg, tmp_path, 2)
+    start(cfg, pid)
+    run(cfg, clock)
+    for page in page_rows(cfg, pid):
+        with connect(cfg) as db:
+            detail = projects.page_detail(db, page["id"])
+        planning.review(
+            cfg,
+            page["id"],
+            {
+                "expected_version": page["version"],
+                "latest_round_id": page["latest_round_id"],
+                "decision": "accept",
+                "candidate_id": detail["candidates"][0]["id"],
+            },
+        )
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+    eid = schedule(cfg, pid, {"mode": "complete", "expected_version": version})["export_id"]
+    original = outputs.atomic_write
+    calls = []
+
+    def fail_second(path, data):
+        calls.append(path)
+        if len(calls) == 2:
+            raise OSError("disk error")
+        return original(path, data)
+
+    monkeypatch.setattr(outputs, "atomic_write", fail_second)
+    process_export(cfg)
+    assert not (cfg.root / "exports" / eid).exists()
+    assert not (cfg.root / "exports" / (eid + ".tmp")).exists()
+    with connect(cfg) as db:
+        assert get(db, "exports", eid)["state"] == "failed"
+        db.execute("UPDATE exports SET state='queued' WHERE id=?", (eid,))
+    monkeypatch.setattr(outputs, "atomic_write", original)
+    process_export(cfg)
+    folder = cfg.root / "exports" / eid
+    assert sorted(p.name for p in (folder / "pages").iterdir()) == ["0001.png", "0002.png"]
+    # Recovery after folder publication but before DB completion reuses the same snapshot.
+    with connect(cfg) as db:
+        db.execute("UPDATE exports SET state='running' WHERE id=?", (eid,))
+    process_export(cfg)
+    with connect(cfg) as db:
+        assert get(db, "exports", eid)["state"] == "complete"
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2

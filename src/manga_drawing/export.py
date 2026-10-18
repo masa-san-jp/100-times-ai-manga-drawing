@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
-import zipfile
+import subprocess
+import sys
 
 from PIL import Image
 
@@ -73,14 +75,18 @@ def process_export(cfg):
             if not row:
                 return
             row = dict(row)
-        final = cfg.root / "exports" / f"{row['id']}.zip"
-        temp = final.with_suffix(".tmp")
+        final = cfg.root / "exports" / row["id"]
+        temp = final.with_name(final.name + ".tmp")
         try:
             with transaction(cfg) as db:
                 db.execute("UPDATE exports SET state='running' WHERE id=?", (row["id"],))
             manifest = json.loads(row["manifest_json"])
             width, height = manifest["width"], manifest["height"]
-            with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED) as out, connect(cfg) as db:
+            # A restarted export rebuilds only its private staging folder.
+            if temp.exists():
+                shutil.rmtree(temp)
+            (temp / "pages").mkdir(parents=True)
+            with connect(cfg) as db:
                 for page in manifest["pages"]:
                     with Image.open(assets.path_for(cfg, db, page["asset_hash"])) as source:
                         image = source.convert("L")
@@ -91,9 +97,18 @@ def process_export(cfg):
                         )
                         canvas = Image.new("L", (width, height), "white")
                         canvas.paste(image, ((width - image.width) // 2, (height - image.height) // 2))
-                        out.writestr(f"pages/{page['number']:04d}.png", assets.png(canvas))
-                out.writestr("manifest.json", canonical(manifest))
-            temp.replace(final)
+                        atomic_write(temp / "pages" / f"{page['number']:04d}.png", assets.png(canvas))
+                atomic_write(temp / "manifest.json", canonical(manifest).encode())
+            if final.exists():
+                # Recovery after publication but before the DB completion commit.
+                require(
+                    (final / "manifest.json").read_text() == canonical(manifest),
+                    "export_conflict",
+                    "書き出し先の内容が一致しません。",
+                )
+                shutil.rmtree(temp)
+            else:
+                temp.replace(final)
             with transaction(cfg) as db:
                 db.execute(
                     "UPDATE exports SET state='complete',archive_path=? WHERE id=?",
@@ -104,7 +119,44 @@ def process_export(cfg):
                 db.execute(
                     "UPDATE exports SET state='failed',error=? WHERE id=?", (type(e).__name__, row["id"])
                 )
-            temp.unlink(missing_ok=True)
+            if temp.exists():
+                shutil.rmtree(temp)
+
+
+def output_folder(cfg, row):
+    require(row["state"] == "complete", "not_ready", "書き出しが完了していません。", 409)
+    require(
+        row["archive_path"] == f"exports/{row['id']}",
+        "legacy_export",
+        "以前の圧縮形式です。画像をもう一度書き出してください。",
+        409,
+    )
+    folder = cfg.root / row["archive_path"] / "pages"
+    require(
+        folder.is_dir()
+        and folder.resolve().is_relative_to((cfg.root / "exports").resolve())
+        and not folder.is_symlink()
+        and not folder.parent.is_symlink(),
+        "export_missing",
+        "画像フォルダーが見つかりません。",
+        404,
+    )
+    return folder
+
+
+def open_folder(cfg, row):
+    folder = output_folder(cfg, row)
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(folder))
+        else:
+            command = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.run([command, str(folder)], check=True, capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        raise DomainError(
+            "open_folder", "フォルダーを開けませんでした。表示された保存先から開いてください。"
+        ) from None
+    return folder
 
 
 def backup(cfg, output):

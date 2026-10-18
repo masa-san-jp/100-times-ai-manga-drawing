@@ -9,7 +9,7 @@
 - 受理2バッチ・成功3要求。各要求の添付はネーム・指示書・人物資料の3画像。累積上限3を変更していない。
 - 初回のページ1を機能試験用に採用し、ページ2だけ却下・プロンプト修正・再生成した。
 - ページ1の採用ID・画像hash・実ファイルhashが再生成の前後で不変。
-- 最終2ページをZIPへ出力。最終採用ID/hashとmanifestの一致、ページ順、1410×1920のグレースケールPNG、ZIP内manifestの一致を確認した。
+- 最終2ページを通常の画像フォルダーへ出力。最終採用ID/hashとmanifestの一致、ページ順、1410×1920のグレースケールPNG、出力フォルダー内manifestの一致を確認した。
 - 完了時刻（UTC）: 2026-10-18T01:50:18.797257+00:00。doctorは問題なし。
 
 ## 識別子と証拠
@@ -20,7 +20,7 @@
 | 初回の外部バッチ | batches/8yoxmcr13k4xnqr7xi2ajs32emh2wxre9uuq |
 | 修正の外部バッチ | batches/a7p3u6v7k6rhqfa7yugjuluomivck8w42n23 |
 | 不変のページ1候補 | 5f2aeb65-71cf-4147-9821-98c29c213e21 |
-| 書き出し | c0933fec-7ed5-41fd-a9e5-3d743d9d2a5c |
+| 書き出し | 2a4d1202-16ce-439c-a319-0bbbb362922d |
 
 ページ1の不変hash: `c649b2cab525517eb775d8f276f961e170f37e8be5fc57163aba8c448f2924eb`。
 
@@ -28,7 +28,7 @@
 
 秘密情報を除いた実応答schemaは[fixture](fixtures/gemini-live-response.json)。画像base64、思考署名、応答IDは省略した。実応答はJPEGを含み、PNGに限定しないこともオフライン回帰試験にした。
 
-ローカルの完全記録は`artifacts/live-acceptance.json`、生成物とZIPは`.data/live-acceptance/`。APIキーと完全な応答ファイルはGitに含めない。
+ローカルの完全記録は`artifacts/live-acceptance.json`、生成物と出力フォルダーは`.data/live-acceptance/`。APIキーと完全な応答ファイルはGitに含めない。
 
 ## 範囲と残る確認
 
@@ -40,4 +40,8 @@
 
 [運用手順](operations.md)、[独立レビュー](gemini-review.md)を参照。
 
-最終検証はChromiumを含む全103試験成功、ruff check/format成功。実DB・ZIPの独立レビュー2名もPASS（未解決指摘なし）。生成画像は実APIでの3要求成功、作者の品質採否はpendingとして記録した。
+最終検証はChromiumを含む全103試験成功、ruff check/format成功。旧ZIP時点の実DB・出力はAIエージェント2体による内部確認を実施した（人間レビューではない）。生成画像は実APIでの3要求成功、作者の品質採否はpendingとして記録した。
+
+ユーザー指示により標準出力をフォルダーへ変更し、実データの採用2枚を追加生成なしで連番PNGへ再出力した。画面のボタンで画像フォルダーを直接開く実操作も確認した。現在の出力先は`exports/2a4d1202-16ce-439c-a319-0bbbb362922d/pages/`。
+
+フォルダー出力の確認では、完成前の部分出力を公開しないこと、途中失敗・公開後の再起動からの回復、画面再読み込み後のフォルダー再表示も検証した。既存の生成画像・採用と元の出力記録を保持している。

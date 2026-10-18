@@ -223,7 +223,16 @@ def create_app(cfg=None):
     def listing(request: Request, pid: str):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
-        return templates.TemplateResponse(request=request, name="pages.html", context={"project": project})
+            latest_export = db.execute(
+                "SELECT id FROM exports WHERE project_id=? AND state='complete' "
+                "AND archive_path NOT LIKE '%.zip' ORDER BY created_at DESC LIMIT 1",
+                (pid,),
+            ).fetchone()
+        return templates.TemplateResponse(
+            request=request,
+            name="pages.html",
+            context={"project": project, "latest_export": latest_export[0] if latest_export else None},
+        )
 
     @app.get("/pages/{page_id}")
     def detail(request: Request, page_id: str):
@@ -487,21 +496,40 @@ def create_app(cfg=None):
 
     @app.get("/api/exports/{eid}")
     def export_status(eid: str):
+        from .export import output_folder
+
         with connect(cfg) as db:
             row = get(db, "exports", eid)
+        folder = (
+            output_folder(cfg, row)
+            if row["state"] == "complete" and row["archive_path"] == f"exports/{eid}"
+            else None
+        )
         return {
             "data": {
                 "state": row["state"],
                 "error": row["error"],
-                "download_url": f"/api/exports/{eid}/download" if row["state"] == "complete" else None,
+                "folder_path": str(folder) if folder else None,
+                "open_url": f"/api/exports/{eid}/open" if folder else None,
             }
         }
+
+    @app.post("/api/exports/{eid}/open")
+    def open_export(eid: str):
+        from .export import open_folder
+
+        with connect(cfg) as db:
+            row = get(db, "exports", eid)
+        return {"data": {"folder_path": str(open_folder(cfg, row))}}
 
     @app.get("/api/exports/{eid}/download")
     def download(eid: str):
         with connect(cfg) as db:
             row = get(db, "exports", eid)
         require(row["state"] == "complete", "not_ready", "書き出しが完了していません。", 409)
+        require(
+            row["archive_path"].endswith(".zip"), "folder_export", "画像フォルダーを開いてください。", 409
+        )
         return FileResponse(cfg.root / row["archive_path"], filename="manga-pages.zip")
 
     @app.get("/api/assets/{hash_}")

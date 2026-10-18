@@ -57,7 +57,7 @@ def test_offline_live_flow_waits_revises_once_and_proves_baseline(live, tmp_path
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 3
         page = projects.page_detail(db, record["baseline"]["page_id"])
         assert page["accepted_candidate_id"] == record["baseline"]["candidate_id"]
-    assert Path(record["export_path"]).is_file()
+    assert Path(record["export_path"]).is_dir()
 
 
 def test_offline_live_flow_stops_on_unknown_without_new_jobs(live, tmp_path):

@@ -227,3 +227,40 @@ def contrast(first, second):
 
     a, b = sorted((luminance(first), luminance(second)))
     return (b + 0.05) / (a + 0.05)
+
+
+def test_export_opens_normal_image_folder_after_reload(browser_app, cfg, tmp_path, clock, monkeypatch):
+    from manga_drawing import planning, projects, export as outputs
+
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    p = page_rows(cfg, pid)[0]
+    with connect(cfg) as db:
+        candidate = projects.page_detail(db, p["id"])["candidates"][0]
+    planning.review(
+        cfg,
+        p["id"],
+        {
+            "expected_version": p["version"],
+            "latest_round_id": p["latest_round_id"],
+            "decision": "accept",
+            "candidate_id": candidate["id"],
+        },
+    )
+    opened = []
+    monkeypatch.setattr(outputs.subprocess, "run", lambda args, **kwargs: opened.append(args))
+    page.goto(f"{base}/projects/{pid}")
+    page.locator("#export-all").click()
+    expect(page.locator("#export-status")).to_have_text("書き出し中…")
+    outputs.process_export(cfg)
+    button = page.get_by_role("button", name="画像フォルダーを開く", exact=True)
+    expect(button).to_be_visible()
+    assert "ZIP" not in page.locator("#export-status").inner_text()
+    button.click()
+    expect(page.locator("#notice")).to_have_text("画像フォルダーを開きました。")
+    assert Path(opened[0][-1]).is_dir()
+    assert [p.name for p in Path(opened[0][-1]).iterdir()] == ["0001.png"]
+    page.reload()
+    expect(button).to_be_visible()

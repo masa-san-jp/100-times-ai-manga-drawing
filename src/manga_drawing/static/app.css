@@ -5,3 +5,5 @@
 
 .saved-prompt{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:14px;background:var(--surface);border:1px solid var(--line);padding:16px;max-height:420px;overflow:auto}
 @media(max-width:700px){.review-panel .actions{flex-direction:column;align-items:stretch}.review-panel .actions>button{width:100%;flex:auto}.review-panel #accepted-label{display:block;margin:12px 0}}
+
+.export-bar>p,#export-status{width:100%;margin:0}#export-status .muted{overflow-wrap:anywhere}
