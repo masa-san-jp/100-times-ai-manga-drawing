@@ -595,7 +595,7 @@ def resolve(cfg, cid, request, key):
             require(
                 remote
                 and remote["display_key"] == chunk["display_key"]
-                and remote["model"] == ("mock-batch-v1" if cfg.provider == "mock" else "gemini-3-pro-image"),
+                and remote["model"] == json.loads(source[0])["settings"]["model"],
                 "remote_mismatch",
                 "外部処理の条件が一致しません。",
                 422,

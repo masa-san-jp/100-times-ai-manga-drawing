@@ -544,3 +544,23 @@ def test_normal_mode_ignores_accumulated_test_limit(live, tmp_path, clock):
         )
     assert len(fake.creates) == 1
     assert health(cfg)["live_remaining_requests"] is None
+
+
+@pytest.mark.parametrize("model", [MODEL, "gemini-3.1-flash-image", "gemini-3-pro-image"])
+def test_current_and_legacy_models_complete_batch(live, tmp_path, clock, model):
+    cfg, fake, provider = live
+    pid, _ = make_project(cfg, tmp_path, 1)
+    if model != MODEL:
+        with transaction(cfg) as db:
+            db.execute("UPDATE projects SET settings_json=? WHERE id=?", (json.dumps({"model": model}), pid))
+    with transaction(cfg) as db:
+        plan = planning.make_plan(cfg, db, pid, {})
+    assert plan["pages"][0]["snapshot"]["settings"]["model"] == model
+    start(cfg, pid)
+    worker = Worker(cfg, clock)
+    for _ in range(6):
+        worker.tick()
+        clock.advance(3)
+    assert fake.creates[0][0] == model
+    with connect(cfg) as db:
+        assert db.execute("SELECT state FROM jobs").fetchone()[0] == "succeeded"

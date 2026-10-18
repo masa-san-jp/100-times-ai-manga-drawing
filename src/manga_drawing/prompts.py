@@ -6,6 +6,7 @@ from . import assets
 from .common import DomainError, canonical, digest, require
 from .models import Draft
 from .projects import references
+from .providers.gemini import MODEL, SUPPORTED_MODELS
 
 TEMPLATE_VERSION = "mono-v2"
 RULES = """マンガの清書に使うモノクロの下書きを1ページ生成してください。
@@ -45,7 +46,7 @@ def snapshot(cfg, db, page, overrides=None):
     settings = (
         {
             "provider": cfg.provider,
-            "model": "mock-batch-v1" if cfg.provider == "mock" else "gemini-3-pro-image",
+            "model": "mock-batch-v1" if cfg.provider == "mock" else MODEL,
             "width": 1410,
             "height": 1920,
             "scenario": "success",
@@ -61,7 +62,7 @@ def snapshot(cfg, db, page, overrides=None):
         422,
     )
     require(
-        settings["model"] == ("mock-batch-v1" if cfg.provider == "mock" else "gemini-3-pro-image"),
+        settings["model"] in ({"mock-batch-v1"} if cfg.provider == "mock" else SUPPORTED_MODELS),
         "model",
         "対応するモデルを指定してください。",
         422,

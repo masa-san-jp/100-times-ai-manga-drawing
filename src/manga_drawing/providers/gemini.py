@@ -13,7 +13,8 @@ from ..common import DomainError, canonical, require
 from ..db import connect
 from .base import RateLimited, SubmissionUnknown
 
-MODEL = "gemini-3-pro-image"
+MODEL = "gemini-nano-banana-2.1"
+SUPPORTED_MODELS = {MODEL, "gemini-3.1-flash-image", "gemini-3-pro-image"}
 TERMINAL = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"}
 
 
@@ -92,7 +93,10 @@ class GeminiProvider:
 
     def validate(self, profile, snapshots):
         return {
-            "valid": profile == MODEL and all(s["settings"]["provider"] == "gemini" for s in snapshots),
+            "valid": profile in SUPPORTED_MODELS
+            and all(
+                s["settings"]["provider"] == "gemini" and s["settings"]["model"] == profile for s in snapshots
+            ),
             "count": len(snapshots),
         }
 
@@ -105,7 +109,8 @@ class GeminiProvider:
                 for item in requests:
                     snap = item["snapshot"]
                     require(
-                        snap["settings"]["provider"] == "gemini" and snap["settings"]["model"] == MODEL,
+                        snap["settings"]["provider"] == "gemini"
+                        and snap["settings"]["model"] in SUPPORTED_MODELS,
                         "provider_mismatch",
                         "保存済み入力のAPIとモデルが一致しません。",
                         422,
@@ -178,7 +183,7 @@ class GeminiProvider:
     def submit(self, input_name, model, display_key):
         ensure_configured(self.cfg)
         safe_resource(input_name, "files")
-        require(model == MODEL, "model", "対応確認対象のモデルを指定してください。", 422)
+        require(model in SUPPORTED_MODELS, "model", "対応確認対象のモデルを指定してください。", 422)
         try:
             job = self.client.batches.create(
                 model=model, src=input_name, config={"display_name": display_key}
@@ -200,7 +205,7 @@ class GeminiProvider:
             return [
                 safe_resource(job.name, "batches")
                 for job in self.client.batches.list(config={"page_size": 100})
-                if job.display_name == display_key and self._model(job.model) == MODEL
+                if job.display_name == display_key and self._model(job.model) in SUPPORTED_MODELS
             ]
         except Exception:
             raise OSError("gemini_list_failed") from None
