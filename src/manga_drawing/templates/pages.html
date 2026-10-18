@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block screen %}pages{% endblock %}
+{% block content %}
+<nav><a href="/">作品</a><span> / {{project.title}}</span></nav>
+<div class="heading"><div><p class="eyebrow">PAGES</p><h1>{{project.title}}</h1></div><a class="button secondary" href="/projects/{{project.id}}/settings">作品設定</a></div>
+<div class="toolbar"><label>表示<select id="filter"><option value="">すべて</option><option value="new">未生成</option><option value="running">生成中</option><option value="review">確認待ち</option><option value="accepted">採用済み</option><option value="rejected">要修正</option><option value="unknown">結果確認が必要</option><option value="error">エラー</option></select></label><label>候補数<select id="candidate-count"><option>1</option><option>2</option><option>3</option></select></label><button id="generate">未生成ページを生成</button><button id="regenerate" class="secondary">要修正ページをまとめて再生成</button></div>
+<div class="selection"><label><input id="select-visible" type="checkbox"> 表示分を選択</label><button id="select-filter" class="text-button">表示条件に合う全件を選択</button><span id="selection-count"></span></div>
+<p id="progress" role="status"></p><p id="plan-summary" role="status"></p>
+<div id="page-grid" class="page-grid"></div><button id="load-more" class="secondary" hidden>続きを表示</button><p id="empty" hidden>対象のページはありません。</p>
+<section class="export-bar"><h2>採用画像を書き出す</h2><button id="export-all">全ページを書き出す</button><button id="export-partial" class="secondary">採用済み分だけ書き出す</button><span id="export-status" role="status"></span></section>
+<details><summary>処理の詳細と復旧</summary><div id="batch-details"></div><div id="chunk-details"></div><button id="generate-extra" class="secondary">選択ページに候補を追加</button><p class="muted">追加生成でも採用画像は自動で置き換えません。</p></details>
+{% endblock %}

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "title": "サンプル作品",
+  "characters": [
+    {
+      "key": "a",
+      "name": "A",
+      "height_cm": 170,
+      "images": [
+        "character.png"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "number": 1,
+      "name": "name.png",
+      "instructions": "instructions.png",
+      "characters": [
+        "a"
+      ],
+      "directions": [
+        {
+          "marker": "①",
+          "text": "人物Aを中央に配置。"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "name": "name.png",
+      "instructions": "instructions.png",
+      "characters": [
+        "a"
+      ],
+      "directions": [
+        {
+          "marker": "①",
+          "text": "人物Aを中央に配置。"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "name": "name.png",
+      "instructions": "instructions.png",
+      "characters": [
+        "a"
+      ],
+      "directions": [
+        {
+          "marker": "①",
+          "text": "人物Aを中央に配置。"
+        }
+      ]
+    }
+  ]
+}
