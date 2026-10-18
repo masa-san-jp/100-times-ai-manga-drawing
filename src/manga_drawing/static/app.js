@@ -32,7 +32,10 @@ const savedTheme=localStorage.getItem('manga-theme')||'system'; $('theme').value
 $('theme').addEventListener('change',()=>{localStorage.setItem('manga-theme',$('theme').value);applyTheme($('theme').value);});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>applyTheme($('theme').value));
 action('close-zoom',()=> $('zoom').close());
-async function checkHealth() { const h=await api('/api/health'); state.provider=h.provider; $('worker-status').textContent=(h.worker_running?'ワーカー稼働中':'ワーカー停止中 · manga workerで起動')+(h.provider==='gemini'?` / ${h.live_connection_verified?'API疎通確認済':'API疎通未検証'}・残り予約可能${h.live_remaining_requests}件${h.live_limit_wait?`（累積上限のため${h.live_queued_requests}件待機）`:h.live_remaining_requests===0?'（追加予約枠なし）':''}`:''); }
+async function checkHealth() {
+  const h=await api('/api/health');state.provider=h.provider;
+  $('worker-status').textContent=(h.worker_running?'生成処理は稼働中':'生成処理が停止しています')+(h.provider==='gemini'?' / Gemini':' / 模擬API')+(h.live_remaining_requests!==null&&h.provider==='gemini'?` / 試験用の残り生成回数：${h.live_remaining_requests}`:'');
+}
 
 async function settingsScreen() {
   function filterLibrary() {
@@ -159,20 +162,26 @@ async function pagesScreen() {
     const preserveDiagnostics=(document.activeElement?.matches('input,textarea')&&($('batch-details').contains(document.activeElement)||$('chunk-details').contains(document.activeElement)))||Array.from(document.querySelectorAll('#batch-details input,#chunk-details input')).some(e=>e.dataset.edited==='true');
     if(!preserveDiagnostics){
     const box=$('batch-details');box.replaceChildren();
+    const running=p.batches.reduce((n,b)=>n+b.running,0), waiting=p.batches.reduce((n,b)=>n+b.waiting,0), problems=p.batches.reduce((n,b)=>n+b.problems,0);
+    $('generation-status').textContent=running||waiting?`生成中 ${running}件・待機中 ${waiting}件。完了するとページに候補画像を表示します。`:problems?'生成できなかった処理があります。該当ページと下の対応欄を確認してください。':'進行中の生成はありません。候補画像の採否は各ページで判定してください。';
     for(const batch of p.batches){
+      if(!batch.waiting&&!batch.running)continue;
       const row=node('div',undefined,'diagnostic');
-      const remaining=Math.floor((batch.cap_micro-batch.spent_reserved_micro)/batch.unit_reserve_micro);
-      row.append(node('p',`残り送信枠 ${remaining}件${remaining===0?' · 未送信があれば枠を追加してください':''}`));
-      const pause=node('button',batch.paused?'送信を再開':'新しい送信を停止','secondary');pause.addEventListener('click',()=>api(`/api/batches/${batch.id}/pause`,'POST',{paused:!batch.paused}).then(refresh).catch(e=>notice(e.message)));
-      const label=node('label','追加する送信件数');const input=node('input');input.type='number';input.min='1';input.value='1';input.setAttribute('aria-label','追加する送信件数');label.append(input);
-      const increase=node('button','送信枠を追加','secondary');increase.addEventListener('click',()=>api(`/api/batches/${batch.id}/budget`,'PATCH',{expected_cap:batch.cap_micro,new_cap:batch.cap_micro+Number(input.value)*batch.unit_reserve_micro}).then(()=>{input.dataset.edited='false';return refresh();}).catch(e=>notice(e.message)));
-      row.append(pause,label,increase);box.append(row);
+      row.append(node('p',`生成中 ${batch.running}件・待機中 ${batch.waiting}件${batch.paused?'（開始を一時停止中）':''}`));
+      if(batch.waiting){
+        const pause=node('button',batch.paused?'待機中の生成を再開':'待機中の生成を一時停止','secondary');pause.addEventListener('click',()=>api(`/api/batches/${batch.id}/pause`,'POST',{paused:!batch.paused}).then(refresh).catch(e=>notice(e.message)));row.append(pause);
+        if(batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro>batch.cap_micro){
+          const resume=node('button',`待機中の${batch.waiting}件を生成する`,'secondary');resume.addEventListener('click',()=>api(`/api/batches/${batch.id}/budget`,'PATCH',{expected_cap:batch.cap_micro,new_cap:batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro}).then(refresh).catch(e=>notice(e.message)));row.append(resume);
+        }
+      }
+      box.append(row);
     }
+    $('recovery-details').hidden=p.chunks.length===0;
     $('chunk-details').replaceChildren();
     for(const chunk of p.chunks){
-      const row=node('div',undefined,'diagnostic');row.append(node('p',`${chunk.state==='unknown'?'結果確認が必要':'処理エラー'} · ${chunk.last_error||''}`));
+      const row=node('div',undefined,'diagnostic');row.append(node('p',chunk.state==='unknown'?'生成結果をまだ確認できません。まず外部APIの結果を再確認してください。':'生成または画像の取得に失敗しました。'));
       const actions=chunk.state==='unknown'?['reconcile','resend']:chunk.remote_name?['refetch']:[];
-      for(const kind of actions){const b=node('button',{reconcile:'外部処理を再照合',resend:'重複の可能性を確認して再送',refetch:'結果を再取得'}[kind],'secondary');b.addEventListener('click',async()=>{try{if(kind==='resend'&&!confirm('既に生成された可能性があります。再送すると重複します。再送しますか？'))return;await operation('resolve:'+chunk.id,async()=>({url:`/api/chunks/${chunk.id}/resolve`,body:{action:kind,expected_state:chunk.state,explicit_duplicate_risk:kind==='resend'}}));await refresh();}catch(e){notice(e.message);}});row.append(b);}
+      for(const kind of actions){const b=node('button',{reconcile:'生成結果を再確認',resend:'重複の可能性を承知して再送',refetch:'生成済みの画像をもう一度取得'}[kind],'secondary');b.addEventListener('click',async()=>{try{if(kind==='resend'&&!confirm('既に生成された可能性があります。再送すると重複します。再送しますか？'))return;await operation('resolve:'+chunk.id,async()=>({url:`/api/chunks/${chunk.id}/resolve`,body:{action:kind,expected_state:chunk.state,explicit_duplicate_risk:kind==='resend'}}));await refresh();}catch(e){notice(e.message);}});row.append(b);}
       if(chunk.state==='unknown'){
         const label=node('label','外部IDを指定');const input=node('input');label.append(input);const attach=node('button','IDを照合','secondary');attach.addEventListener('click',()=>operation('resolve:'+chunk.id,async()=>({url:`/api/chunks/${chunk.id}/resolve`,body:{action:'attach',expected_state:chunk.state,remote_name:input.value}})).then(()=>{input.dataset.edited='false';input.blur();return refresh();}).catch(e=>notice(e.message)));row.append(label,attach);
       }
@@ -246,7 +255,7 @@ async function detailScreen() {
   action('copy-reason',()=>{$('correction').value+='\n'+$('reason').value;markDirty();});
   action('history-more',async()=>{const rows=await api(`/api/pages/${state.page}/history?before=${historyBefore}`);for(const r of rows){historyRounds.set(r.id,r);for(const c of r.candidates)historyCandidates.set(c.id,{...c,round_id:r.id,sequence:r.sequence});}if(rows.length)historyBefore=rows.at(-1).sequence;else $('history-more').hidden=true;await refresh();});
   $('candidate-select').addEventListener('change',showCandidate);
-  $('source-select').addEventListener('change',()=>{$('source-image').src=`/api/assets/${$('source-select').value==='name'?page.draft.name_hash:page.draft.instruction_hash}`;});
+  $('source-select').addEventListener('change',()=>{$('source-image').src=`/api/assets/${$('source-select').value==='name'?page.draft.name_hash:page.draft.instruction_hash}`;$('source-image').alt=$('source-select').value==='name'?'入力のネーム画像':'入力の指示書画像';});
   action('enlarge',()=>{const c=candidate();if(c){$('zoom').querySelector('img').src=`/api/assets/${c.asset_hash}`;$('zoom').showModal();}});
   await refresh();return refresh;
 }

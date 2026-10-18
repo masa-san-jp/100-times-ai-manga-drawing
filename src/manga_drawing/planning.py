@@ -114,13 +114,13 @@ def make_plan(cfg, db, pid, request):
         "waves": math.ceil(chunks / cfg.max_external),
         "jobs": len(selected) * count,
     }
-    if cfg.provider == "gemini":
+    if cfg.provider == "gemini" and cfg.live_request_limit is not None:
         reserved_row = db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()
         reserved = int(reserved_row[0]) if reserved_row else 0
         require(
             len(selected) * count <= cfg.live_request_limit - reserved,
             "live_limit",
-            "保存先全体の残り送信上限が不足しています。",
+            "試験用の累積生成回数に達しました。.envのMANGA_LIVE_MAX_REQUESTSを空欄にすると通常利用に戻せます。",
             422,
         )
         require(

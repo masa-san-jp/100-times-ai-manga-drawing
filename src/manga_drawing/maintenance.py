@@ -41,12 +41,13 @@ def live_check(cfg):
         "MANGA_PROVIDER=gemini": cfg.provider == "gemini",
         "MANGA_ENABLE_LIVE=1": cfg.enable_live,
         "GEMINI_API_KEY": bool(cfg.gemini_api_key),
-        "MANGA_LIVE_MAX_REQUESTS": cfg.live_request_limit > 0,
+        "MANGA_LIVE_MAX_REQUESTS": (cfg.live_request_limit is None or cfg.live_request_limit > 0),
         "MANGA_LIVE_BUDGET_PER_IMAGE_USD": cfg.live_unit_micro > 0,
         "google-genai": sdk_version is not None,
         "database_readable": database_readable,
         "no_existing_live_jobs": database_readable and active_jobs == 0,
-        "remaining_requests_at_least_3": database_readable and cfg.live_request_limit - reserved >= 3,
+        "remaining_requests_at_least_3": database_readable
+        and (cfg.live_request_limit is None or cfg.live_request_limit - reserved >= 3),
     }
     return {
         "ready": all(checks.values()),

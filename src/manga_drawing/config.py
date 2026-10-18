@@ -48,7 +48,7 @@ class Config:
     poll_interval: float = 1.0
     enable_live: bool = False
     gemini_api_key: str = field(default="", repr=False, compare=False)
-    live_request_limit: int = 0
+    live_request_limit: int | None = None
     live_unit_micro: int = 0
 
     @classmethod
@@ -61,7 +61,9 @@ class Config:
             provider=env.get("MANGA_PROVIDER") or "mock",
             enable_live=env.get("MANGA_ENABLE_LIVE") == "1",
             gemini_api_key=env.get("GEMINI_API_KEY") or "",
-            live_request_limit=int(env.get("MANGA_LIVE_MAX_REQUESTS") or "0"),
+            live_request_limit=int(env["MANGA_LIVE_MAX_REQUESTS"])
+            if env.get("MANGA_LIVE_MAX_REQUESTS")
+            else None,
             live_unit_micro=budget_from_env(env),
             poll_interval=60.0 if env.get("MANGA_PROVIDER") == "gemini" else 1.0,
         )

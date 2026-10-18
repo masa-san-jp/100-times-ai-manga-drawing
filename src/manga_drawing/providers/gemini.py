@@ -50,7 +50,10 @@ def rejection_code(exc):
 
 def ensure_configured(cfg):
     if not (
-        cfg.enable_live and cfg.gemini_api_key and cfg.live_request_limit > 0 and cfg.live_unit_micro > 0
+        cfg.enable_live
+        and cfg.gemini_api_key
+        and (cfg.live_request_limit is None or cfg.live_request_limit > 0)
+        and cfg.live_unit_micro > 0
     ):
         raise ProviderNotConfigured()
 

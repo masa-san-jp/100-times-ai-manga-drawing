@@ -172,16 +172,12 @@ def test_diagnostic_inputs_survive_poll(browser_app, cfg, tmp_path, clock):
     start(cfg, pid)
     run(cfg, clock)
     page.goto(f"{base}/projects/{pid}")
-    page.get_by_text("処理の詳細と復旧", exact=True).click()
+    page.get_by_text("生成できなかったページへの対応", exact=True).click()
     external = page.locator("#chunk-details input")
     expect(external).to_have_count(1)
     external.fill("external-id-being-entered")
     page.wait_for_timeout(5500)
     expect(external).to_have_value("external-id-being-entered")
-    budget = page.locator("#batch-details input")
-    budget.fill("17")
-    page.wait_for_timeout(5500)
-    expect(budget).to_have_value("17")
 
 
 def test_revision_response_loss_does_not_discard_new_edit(browser_app, cfg, tmp_path, clock):
@@ -373,3 +369,23 @@ def test_list_requires_candidate_comparison_and_explicit_unaccept(browser_app, c
             is None
         )
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+def test_instruction_default_and_simple_generation_status(browser_app, cfg, tmp_path, clock):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    item = page_rows(cfg, pid)[0]
+    page.goto(f"{base}/pages/{item['id']}")
+    expect(page.locator("#source-select")).to_have_value("instructions")
+    from manga_drawing import projects
+
+    with connect(cfg) as db:
+        instruction = projects.page_detail(db, item["id"])["draft"]["instruction_hash"]
+    expect(page.locator("#source-image")).to_have_attribute("src", f"/api/assets/{instruction}")
+    expect(page.locator("#save-draft")).to_have_text("修正内容を保存")
+    page.goto(f"{base}/projects/{pid}")
+    expect(page.locator("#generation-status")).to_contain_text("進行中の生成はありません")
+    expect(page.locator("#recovery-details")).to_be_hidden()
+    expect(page.locator("#batch-details")).to_be_empty()

@@ -89,7 +89,10 @@ class Worker:
                         "SELECT value FROM system WHERE key='gemini_reserved_requests'"
                     ).fetchone()
                     reserved = int(row[0]) if row else 0
-                    if reserved + len(chosen) > self.cfg.live_request_limit:
+                    if (
+                        self.cfg.live_request_limit is not None
+                        and reserved + len(chosen) > self.cfg.live_request_limit
+                    ):
                         continue
                     db.execute(
                         "INSERT OR REPLACE INTO system VALUES('gemini_reserved_requests',?)",
@@ -147,9 +150,11 @@ class Worker:
                     "SELECT value FROM system WHERE key='gemini_reserved_requests'"
                 ).fetchone()
                 batch = get(db, "batches", chunk["batch_id"])
-                if (reserved and int(reserved[0]) > self.cfg.live_request_limit) or batch[
-                    "unit_reserve_micro"
-                ] < self.cfg.live_unit_micro:
+                if (
+                    self.cfg.live_request_limit is not None
+                    and reserved
+                    and int(reserved[0]) > self.cfg.live_request_limit
+                ) or batch["unit_reserve_micro"] < self.cfg.live_unit_micro:
                     db.execute(
                         "UPDATE chunks SET last_error='live_limit',next_poll_at=? WHERE id=?",
                         (self.clock() + 60, cid),

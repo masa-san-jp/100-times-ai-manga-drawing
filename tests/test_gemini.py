@@ -525,3 +525,22 @@ def test_accepted_batch_keeps_reservations_even_when_output_missing(live, tmp_pa
             int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
             == 2
         )
+
+
+def test_normal_mode_ignores_accumulated_test_limit(live, tmp_path, clock):
+    cfg, fake, _ = live
+    cfg = replace(cfg, live_request_limit=None)
+    with connect(cfg) as db:
+        db.execute("INSERT OR REPLACE INTO system VALUES('gemini_reserved_requests','999')")
+    pid, _ = make_project(cfg, tmp_path, 4)
+    start(cfg, pid)
+    worker = Worker(cfg, clock)
+    worker.tick()
+    with connect(cfg) as db:
+        assert db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 4
+        assert (
+            int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+            == 1003
+        )
+    assert len(fake.creates) == 1
+    assert health(cfg)["live_remaining_requests"] is None

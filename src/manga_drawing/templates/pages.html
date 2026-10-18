@@ -9,5 +9,5 @@
 <p id="progress" role="status"></p><p id="plan-summary" role="status"></p>
 <div id="page-grid" class="page-grid"></div><button id="load-more" class="secondary" hidden>続きを表示</button><p id="empty" hidden>対象のページはありません。</p>
 <section class="export-bar"><h2>採用画像を書き出す</h2><p>ページ順のPNG画像をフォルダーに保存します。</p><button id="export-all">全ページを書き出す</button><button id="export-partial" class="secondary">採用済み分だけ書き出す</button><div id="export-status" role="status"{% if latest_export %} data-export-id="{{latest_export}}"{% endif %}></div></section>
-<details><summary>処理の詳細と復旧</summary><div id="batch-details"></div><div id="chunk-details"></div><button id="generate-extra" class="secondary">選択ページに候補を追加</button><p class="muted">追加生成でも採用画像は自動で置き換えません。</p></details>
+<section class="panel"><h2>生成の状況</h2><p id="generation-status" role="status"></p><div id="batch-details"></div><details id="recovery-details" hidden><summary>生成できなかったページへの対応</summary><p>結果を確認できない生成や、画像を取得できなかった生成を確認します。再送は重複して課金される可能性があるため、まず結果の再確認を行ってください。</p><div id="chunk-details"></div></details><details><summary>別の候補を追加する</summary><p>上の「生成・再生成するページを絞る」で対象を指定します。追加生成にはAPI利用料がかかります。</p><button id="generate-extra" class="secondary">指定ページに別の候補を生成</button></details></section>
 {% endblock %}

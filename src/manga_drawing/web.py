@@ -116,9 +116,13 @@ def health(cfg):
     return {
         "provider": cfg.provider,
         "live_enabled": cfg.enable_live,
-        "live_remaining_requests": max(0, cfg.live_request_limit - reserved),
+        "live_remaining_requests": max(0, cfg.live_request_limit - reserved)
+        if cfg.live_request_limit is not None
+        else None,
         "live_queued_requests": pending,
-        "live_limit_wait": cfg.provider == "gemini" and pending > max(0, cfg.live_request_limit - reserved),
+        "live_limit_wait": cfg.provider == "gemini"
+        and cfg.live_request_limit is not None
+        and pending > max(0, cfg.live_request_limit - reserved),
         "real_api_connected": cfg.provider == "gemini" and verified,
         "live_connection_verified": cfg.provider == "gemini" and verified,
         "worker_running": bool(heartbeat_row and time.time() - float(heartbeat_row[0]) < 30),
@@ -503,7 +507,7 @@ def create_app(cfg=None):
             batch = get(db, "batches", bid)
             require(batch["cap_micro"] == body.expected_cap and body.new_cap >= batch["spent_reserved_micro"])
             plan_settings = json.loads(batch["plan_json"])["pages"][0]["snapshot"]["settings"]
-            if plan_settings["provider"] == "gemini":
+            if plan_settings["provider"] == "gemini" and cfg.live_request_limit is not None:
                 require(
                     body.new_cap <= cfg.live_request_limit * batch["unit_reserve_micro"],
                     "live_limit",
@@ -542,14 +546,19 @@ def create_app(cfg=None):
             batches = [
                 dict(r)
                 for r in db.execute(
-                    "SELECT id,cap_micro,unit_reserve_micro,spent_reserved_micro,paused FROM batches WHERE project_id=? ORDER BY created_at DESC",
+                    """SELECT b.id,b.cap_micro,b.unit_reserve_micro,b.spent_reserved_micro,b.paused,
+                    (SELECT COUNT(*) FROM jobs WHERE batch_id=b.id AND state IN ('queued','retry_wait')) waiting,
+                    (SELECT COUNT(*) FROM jobs WHERE batch_id=b.id AND state='running') running,
+                    (SELECT COUNT(*) FROM jobs WHERE batch_id=b.id AND state='succeeded') succeeded,
+                    (SELECT COUNT(*) FROM jobs WHERE batch_id=b.id AND state IN ('failed','unknown')) problems
+                    FROM batches b WHERE b.project_id=? ORDER BY b.created_at DESC""",
                     (pid,),
                 )
             ]
             chunks = [
                 dict(r)
                 for r in db.execute(
-                    "SELECT c.id,c.state,c.last_error,c.remote_name FROM chunks c JOIN batches b ON b.id=c.batch_id WHERE b.project_id=? AND c.state IN ('unknown','failed')",
+                    "SELECT c.id,c.state,c.last_error,c.remote_name FROM chunks c JOIN batches b ON b.id=c.batch_id WHERE b.project_id=? AND c.state IN ('unknown','failed') AND EXISTS(SELECT 1 FROM attempts a JOIN jobs j ON j.active_attempt_id=a.id WHERE a.chunk_id=c.id AND j.state IN ('unknown','failed'))",
                     (pid,),
                 )
             ]
