@@ -23,3 +23,6 @@
 .character-card pre{white-space:pre-wrap;overflow-wrap:anywhere}
 
 .workflow-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.workflow-counts dt{font-weight:600}.workflow-counts dd{margin:4px 0;overflow-wrap:anywhere}@media(max-width:600px){.workflow-counts{grid-template-columns:1fr;gap:8px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.workflow-bar{border-block:1px solid var(--line);padding:12px 0;margin:20px 0}.workflow-bar .workflow-counts{margin:0}.workflow-counts dt{font-size:13px;color:var(--muted);font-weight:400}.workflow-action{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px}.workflow-action p{margin:0}p:empty{display:none}.screen-help{font-size:14px}.heading>.actions{flex-wrap:wrap}.character-card .character-state{font-weight:600}.character-card .actions{margin-top:12px}.character-card details{margin-bottom:0}.export-bar details{font-size:14px}.export-bar #export-status{margin-top:16px}#batch-selection{margin:8px 0;padding:8px 0}
+@media(max-width:700px){.heading{flex-wrap:wrap}.workflow-action{align-items:flex-start}.workflow-counts{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.workflow-counts dd{font-size:14px}.heading>.actions{gap:8px}}

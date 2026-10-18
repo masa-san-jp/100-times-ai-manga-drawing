@@ -2,9 +2,8 @@
 {% block screen %}characters{% endblock %}
 {% block content %}
 <nav><a href="/projects/{{project.id}}">← ページ一覧</a></nav>
-<div class="heading"><div><p class="eyebrow">CHARACTERS</p><h1>キャラクターリファレンス</h1><p>{{project.title}}</p></div><button id="generate-characters">未生成・要修正の人物をまとめて生成</button></div>
-<p>スケッチから設定画を生成し、人物ごとに採用してください。採用した画像をページ作画に使います。修正指示を入力して、その人物だけ再生成できます。</p>
-<p>画像は作品フォルダーの「キャラクターリファレンス／人物キー」にテイク番号付きで保存します。原案のスケッチは保持します。</p>
+<div class="heading"><h1>キャラクター</h1><button id="generate-characters" aria-label="未生成・要修正の人物をまとめて生成">まとめて生成</button></div>
 <p id="character-progress" role="status"></p><div id="character-grid" class="character-grid"></div>
-<section id="character-recovery" class="panel" hidden><h2>生成できなかった人物への対応</h2><p>失敗・結果不明の処理は、既存の再試行・結果照会で復旧できます。再送する前に結果を照合してください。</p><div id="character-batches"></div></section>
+<section id="character-recovery" class="panel" hidden><h2>復旧</h2><div id="character-batches"></div></section>
+<details class="screen-help"><summary>ヘルプ</summary><p>スケッチから設定画を生成し、人物ごとに採用します。採用した画像をページ作画に使用します。</p><p>指示を修正し、人物ごとに再生成できます。画像は「キャラクターリファレンス／人物キー」にテイク番号付きで保存します。</p></details>
 {% endblock %}

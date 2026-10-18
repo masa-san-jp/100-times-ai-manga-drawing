@@ -248,6 +248,10 @@ def test_review_old_candidate_preserves_acceptance(cfg, tmp_path, clock):
     )
     run(cfg, clock)
     assert page_rows(cfg, pid)[0]["accepted_candidate_id"] == old["id"]
+    with connect(cfg) as db:
+        listed = projects.page_list(db, pid)["items"][0]
+        assert listed["preview_take"] == 1
+        assert listed["generation_sequence"] == 2
     with pytest.raises(DomainError):
         planning.review(
             cfg,

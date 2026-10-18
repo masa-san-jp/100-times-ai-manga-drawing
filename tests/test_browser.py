@@ -366,7 +366,7 @@ def test_list_requires_candidate_comparison_and_explicit_unaccept(browser_app, c
     page.locator("#accept").click()
     expect(page.locator("#page-status")).to_have_text("採用済み")
     page.goto(f"{base}/projects/{pid}")
-    expect(page.locator(".card-reject")).to_have_text("採用解除して要修正")
+    expect(page.locator(".card-reject")).to_have_text("要修正に戻す")
     page.locator(".card-reject").click()
     expect(page.locator(".review-status")).to_have_text("要修正")
     with connect(cfg) as db:
@@ -418,7 +418,8 @@ def test_regeneration_placeholder_matches_current_request(browser_app, cfg, tmp_
     expect(page.locator(".thumbnail img")).to_have_count(1)
     page.locator("#regenerate").click()
     expect(page.locator("#plan-summary")).to_contain_text("生成依頼を受付済み")
-    expect(page.locator(".thumbnail")).to_have_text("依頼受付済み・API送信待ち")
+    expect(page.locator(".thumbnail")).to_have_text("画像なし")
+    expect(page.locator(".generation-phase")).to_contain_text("依頼受付済み・API送信待ち")
     expect(page.locator(".thumbnail img")).to_have_count(0)
     expect(page.locator(".generation-phase")).to_contain_text("テイク2")
     page.locator(".page-card a").click()
@@ -669,3 +670,29 @@ def test_real_user_settings_hide_development_controls_and_save(browser_app, cfg,
         assert db.execute("SELECT title FROM projects WHERE id=?", (pid,)).fetchone()[0] == "実利用の作品名"
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
     assert not errors
+
+
+def test_accepted_preview_distinguishes_new_take(browser_app, cfg, tmp_path, clock):
+    from manga_drawing import planning, projects
+
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    item = page_rows(cfg, pid)[0]
+    with connect(cfg) as db:
+        candidate_id = projects.page_detail(db, item["id"])["candidates"][0]["id"]
+    planning.review(cfg, item["id"], {
+        "expected_version": item["version"],
+        "latest_round_id": item["latest_round_id"],
+        "decision": "accept",
+        "candidate_id": candidate_id,
+    })
+    start(cfg, pid, kind="extra", page_ids=[item["id"]])
+    page.goto(f"{base}/projects/{pid}")
+    expect(page.locator(".generation-phase")).to_contain_text("表示テイク1 ／ テイク2")
+    expect(page.locator(".generation-phase")).to_contain_text("API送信待ち")
+    run(cfg, clock)
+    page.reload()
+    expect(page.locator(".generation-phase")).to_have_text("表示テイク1 ／ 新候補テイク2")
+    expect(page.locator(".review-status")).to_have_text("採用済み")

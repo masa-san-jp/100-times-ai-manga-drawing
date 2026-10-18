@@ -34,7 +34,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>applyTh
 action('close-zoom',()=> $('zoom').close());
 async function checkHealth() {
   const h=await api('/api/health');state.provider=h.provider;
-  $('worker-status').textContent=(h.worker_running?'生成処理は稼働中':'生成処理が停止しています')+(h.provider==='gemini'?' / Gemini':' / 模擬API')+(h.live_remaining_requests!==null&&h.provider==='gemini'?` / 試験用の残り生成回数：${h.live_remaining_requests}`:'')+(h.reference_output_error?' / キャラクターリファレンスのファイル保存に失敗（アプリ内の画像は保持）':'')+(h.rejected_output_error?' / 却下候補のファイル保存に失敗（アプリ内の画像は保持）':'');
+  $('worker-status').textContent=(h.worker_running?'稼働中':'生成処理停止中')+(h.live_remaining_requests!==null&&h.provider==='gemini'?` / 試験用の残り生成回数：${h.live_remaining_requests}`:'')+(h.reference_output_error?' / キャラクターリファレンスのファイル保存に失敗（アプリ内の画像は保持）':'')+(h.rejected_output_error?' / 却下候補のファイル保存に失敗（アプリ内の画像は保持）':'');
 }
 
 async function settingsScreen() {
@@ -86,12 +86,13 @@ async function pagesScreen() {
   function pendingGeneration(kind){return !!sessionStorage.getItem('manga-operation:generate:'+state.project+':'+kind);}
   function generationDisabled(kind){return !pendingGeneration(kind)&&!!workflow&&workflow.pages[kind==='initial'?'not_requested':'rejected']===0;}
   function countSelection(){
-    $('selection-count').textContent=selected.size?`生成対象：指定した${selected.size}ページ（採否判定とは別です）`:'生成対象：ボタンに該当する全ページ';
+    $('selection-count').textContent=selected.size?`生成対象：指定した${selected.size}ページ`:'生成対象：該当する全ページ';
+    $('selection-count').hidden=!$('batch-selection').open;
     const boxes=Array.from(document.querySelectorAll('.generation-choice input'));
     $('select-visible').checked=boxes.length>0&&boxes.every(box=>box.checked);
     $('select-visible').indeterminate=boxes.some(box=>box.checked)&&!$('select-visible').checked;
     $('generate').textContent=selected.size?'指定ページのうち未生成を生成':'未生成ページを生成';
-    $('regenerate').textContent=selected.size?'指定ページのうち要修正を再生成':'要修正ページをまとめて再生成';
+    $('regenerate').textContent=selected.size?'指定ページのうち要修正を再生成':'要修正を再生成';
     $('generate-extra').disabled=selected.size===0;
     $('generate').disabled=generationDisabled('initial');$('regenerate').disabled=generationDisabled('revision');
     if(pendingGeneration('initial'))$('generate').textContent='前回の生成依頼の受付を確認';
@@ -141,20 +142,24 @@ async function pagesScreen() {
         card.querySelector('input').checked=selected.has(page.id);
         const badge=card.querySelector('.card-caption span');badge.textContent=labels[page.status];badge.className='review-status status-'+page.status;card.dataset.status=page.status;
         const accept=card.querySelector('.card-accept'), reject=card.querySelector('.card-reject');
-        accept.textContent=page.accepted_candidate_id?'採用済み':!page.reviewable?'今回の生成完了後に採用可能':!page.review_candidate_id?'候補を比較して採用':'採用する';
-        accept.disabled=!page.reviewable||!!page.accepted_candidate_id;
-        reject.textContent=page.accepted_candidate_id?'採用解除して要修正':page.status==='rejected'?'要修正に設定済み':'要修正にする';
+        accept.textContent=page.accepted_candidate_id?'採用済み':!page.reviewable?'採用':!page.review_candidate_id?'候補を比較':'採用する';
+        accept.disabled=!page.reviewable||!!page.accepted_candidate_id;accept.hidden=!!page.accepted_candidate_id||!page.reviewable;
+        reject.textContent=page.accepted_candidate_id?'要修正に戻す':'要修正にする';reject.setAttribute('aria-label',page.accepted_candidate_id?'採用解除して要修正':'要修正にする');reject.hidden=page.status==='rejected'||!page.reviewable;
         reject.disabled=!page.reviewable||page.status==='rejected';
-        card.querySelector('.generation-phase').textContent=(page.generation_sequence?`テイク${page.generation_sequence}：`:'')+page.generation_label;
+        const complete=Object.keys(page.generation_counts).length===1&&page.generation_counts.complete;
+        const differentPreview=page.preview_take&&page.preview_take!==page.generation_sequence;
+        card.querySelector('.generation-phase').textContent=differentPreview
+          ? `表示テイク${page.preview_take} ／ ${complete?'新候補':''}テイク${page.generation_sequence}${complete?'':'：'+page.generation_label}`
+          : complete?`テイク${page.preview_take||page.generation_sequence}`:(page.generation_sequence?`テイク${page.generation_sequence}：`:'')+page.generation_label;
         const thumb=card.querySelector('.thumbnail');
         if(page.thumbnail && thumb.dataset.hash!==page.thumbnail){const img=node('img');img.src=`/api/assets/${page.thumbnail}`;img.alt=`${page.number}ページの候補`;img.loading='lazy';thumb.replaceChildren(img);thumb.dataset.hash=page.thumbnail;}
-        if(!page.thumbnail){thumb.replaceChildren(node('span',page.generation_label));delete thumb.dataset.hash;}
+        if(!page.thumbnail){thumb.replaceChildren(node('span','画像なし'));delete thumb.dataset.hash;}
       }
       $('load-more').hidden=!next;$('empty').hidden=items.length!==0;showGenerationChoices();countSelection();
     } finally {busy=false;}
   }
   async function generate(kind) {
-    $('plan-summary').textContent='生成依頼を登録中です。受付完了はまだ確認できていません。';
+    $('plan-summary').textContent='依頼を登録中…';
     let plannedPages=null;
     try { await operation('generate:'+state.project+':'+kind,async()=>{
       const request={kind,candidate_count:Number($('candidate-count').value)};
@@ -165,18 +170,19 @@ async function pagesScreen() {
       return {url:`/api/projects/${state.project}/batches`,body:{plan_token:plan.plan_token}};
     });
     } catch(error){$('plan-summary').textContent=error.definitive?'生成依頼を開始できませんでした。':'生成依頼の受付状況が不明です。ページの状態を再確認してください。';throw error;}
-    $('plan-summary').textContent=`生成依頼を受付済み${plannedPages!==null?`（対象${plannedPages}ページ）`:''}。まだ生成完了ではありません。各ページにAPI送信・生成結果の状態を表示します。`;
+    $('plan-summary').textContent=`生成依頼を受付済み${plannedPages!==null?`（対象${plannedPages}ページ）`:''}。生成完了をお待ちください。`;
     selected.clear();await refresh();
   }
   async function refresh() {
     await checkHealth();
     const p=await api(`/api/projects/${state.project}/progress`);
     workflow=p.workflow;
-    if(workflow){$('workflow-characters').textContent=`採用 ${workflow.characters.accepted} / ${workflow.characters.total}人`;$('workflow-pages').textContent=`採用 ${workflow.pages.accepted} / ${workflow.pages.total}ページ・未判定 ${workflow.pages.unreviewed}・要修正 ${workflow.pages.rejected}`;$('workflow-export').textContent=workflow.export.status;$('workflow-message').textContent=workflow.message;$('workflow-next').textContent=workflow.action_label;$('workflow-next').href=workflow.action_url;$('workflow-next').hidden=false;}
+    if(workflow){$('workflow-characters').textContent=`採用 ${workflow.characters.accepted} / ${workflow.characters.total}人`;$('workflow-pages').textContent=`採用 ${workflow.pages.accepted} / ${workflow.pages.total}ページ`+(workflow.pages.unreviewed?`・未判定 ${workflow.pages.unreviewed}`:'')+(workflow.pages.rejected?`・要修正 ${workflow.pages.rejected}`:'');$('workflow-export').textContent=workflow.export.status;$('workflow-message').textContent=workflow.phase==='complete'?'書き出し済み':workflow.phase==='export'?'全ページ採用済み':workflow.message;$('workflow-next').textContent=workflow.action_label;$('workflow-next').href=workflow.action_url;$('workflow-next').hidden=false;}
     $('progress').textContent=Object.entries(p.counts).map(([status,count])=>`${labels[status]} ${count}ページ`).join('　');
     const preserveDiagnostics=(document.activeElement?.matches('input,textarea')&&($('batch-details').contains(document.activeElement)||$('chunk-details').contains(document.activeElement)))||Array.from(document.querySelectorAll('#batch-details input,#chunk-details input')).some(e=>e.dataset.edited==='true');
     if(!preserveDiagnostics){
     const box=$('batch-details');box.replaceChildren();
+    if(p.chunks.length)$('generation-section').open=true;
     $('generation-status').textContent=p.generation_summary||'生成するページは登録されていません。';
     for(const batch of p.batches){
       if(!batch.waiting&&!batch.running)continue;
@@ -222,7 +228,8 @@ async function pagesScreen() {
     });
     const path=node('p',result.folder_path,'muted');
     const takes=node('p','書き出した採用画像：'+(result.pages||[]).map(page=>`${page.number}ページ＝テイク${page.take}`).join('、'));
-    $('export-status').replaceChildren(button,takes,path);
+    const details=node('details');details.append(node('summary','出力一覧'),takes,path);
+    $('export-status').replaceChildren(button,details);
   }
   const previousExport=$('export-status').dataset.exportId;
   if(previousExport){try{showExportFolder(await api(`/api/exports/${previousExport}`));}catch(error){notice(error.message);}}
@@ -245,7 +252,7 @@ async function detailScreen() {
     const alreadyAccepted=!!c&&c.id===page.accepted_candidate_id;
     $('accept').textContent=alreadyAccepted?'この候補は採用済み':isOld?'表示中の過去候補を採用':'この候補を採用';
     $('accept').disabled=cannotAccept();
-    $('accept-help').textContent=alreadyAccepted?'この画像はすでに採用されています。':!c?'今回の候補画像が届くと採用できます。':isOld?'表示中は過去の版です。採用する場合は上の確認欄にチェックしてください。':'';
+    $('accept-help').textContent=alreadyAccepted?'':!c?'今回の候補画像が届くと採用できます。':isOld?'表示中は過去の版です。採用する場合は上の確認欄にチェックしてください。':'';
   }
   function patch(){return {page_prompt:$('page-prompt').value,correction:$('correction').value,directions:JSON.parse($('directions').value),prompt_override:$('override-enabled').checked?$('prompt-override').value:null};}
   async function refresh() {
@@ -254,7 +261,7 @@ async function detailScreen() {
     page=fetched;
     $('revise').textContent=sessionStorage.getItem('manga-operation:revise:'+state.page)?'前回の再生成結果を確認':'修正して再生成';
     $('generation-phase').textContent=(page.generation_sequence?`今回の生成（テイク${page.generation_sequence}）：`:'')+page.generation_label;
-    $('page-status').textContent=labels[page.status];$('accepted-label').textContent=page.accepted_candidate_id?'採用画像を保持しています':'';
+    $('page-status').textContent=labels[page.status];$('accepted-label').textContent='';$('clear-accepted').closest('label').hidden=!page.accepted_candidate_id;
     const select=$('candidate-select'), old=select.value||currentCandidate;select.replaceChildren();
     const unique=new Map([...page.candidates,...historyCandidates.values()].map(c=>[c.id,c]));
     for(const c of unique.values()){const opt=node('option',`[${c.provider==='gemini'?'Gemini':'模擬'}] テイク${c.sequence||'?'}・候補${c.candidate_index||''}${c.round_id!==page.latest_round_id?'（過去の生成結果）':''}${c.id===page.accepted_candidate_id?'（採用）':''}${c.availability!=='available'?'（欠損）':''}`);opt.value=c.id;select.append(opt);}
@@ -303,14 +310,15 @@ async function charactersScreen() {
     const root=node('section',undefined,'panel character-card');root.dataset.reference=ref.id;
     const title=node('h2',ref.name),status=node('p',undefined,'character-state'),generation=node('p',undefined,'muted');
     const images=node('div',undefined,'character-images');
-    const source=node('figure'),sketch=node('img');sketch.src=`/api/assets/${ref.sketch}`;sketch.alt=ref.name+'の原案スケッチ';source.append(node('figcaption','原案スケッチ'),sketch);
-    const output=node('figure'),image=node('img'),empty=node('p','リファレンスはまだ生成していません。'),select=node('select');select.setAttribute('aria-label',ref.name+'のテイクを選択');image.alt=ref.name+'のリファレンス候補';output.append(node('figcaption','生成したリファレンス'),image,empty,select);images.append(source,output);
-    const label=node('label','生成・修正の指示（任意）'),prompt=node('textarea');prompt.value=ref.page?.draft.page_prompt||'';label.append(prompt);
+    const source=node('figure'),sketch=node('img');sketch.src=`/api/assets/${ref.sketch}`;sketch.alt=ref.name+'の原案スケッチ';source.append(node('figcaption','スケッチ'),sketch);
+    const output=node('figure'),image=node('img'),empty=node('p','リファレンスはまだ生成していません。'),select=node('select');select.setAttribute('aria-label',ref.name+'のテイクを選択');image.alt=ref.name+'のリファレンス候補';output.append(node('figcaption','設定画'),image,empty,select);images.append(source,output);
+    const label=node('label','修正指示'),prompt=node('textarea');prompt.value=ref.page?.draft.page_prompt||'';label.append(prompt);
     const unsaved=node('p',undefined,'muted');unsaved.setAttribute('role','status');
-    const actions=node('div',undefined,'actions'),saveButton=node('button','修正内容を保存','secondary'),generate=node('button','この人物を生成'),accept=node('button','この候補を採用する'),reject=node('button','要修正にする','secondary'),zoom=node('button','画像を拡大','secondary');actions.append(saveButton,generate,accept,reject,zoom);
-    const history=node('details'),historyTitle=node('summary','最新テイクの生成に使った指示とモデル'),historyText=node('pre');history.append(historyTitle,historyText);
-    const jobs=node('div');root.append(title,node('p',`人物キー：${ref.key}`,'muted'),status,generation,images,label,unsaved,actions,history,jobs);$('character-grid').append(root);
-    const card={root,status,generation,sketch,image,empty,select,prompt,unsaved,saveButton,generate,accept,reject,zoom,historyText,jobs,ref,dirty:false,displayVersion:ref.page?.version??null,displayRevision:ref.revision,round:null};cards.set(ref.id,card);
+    const actions=node('div',undefined,'actions'),saveButton=node('button','保存','secondary'),generate=node('button','この人物を生成'),accept=node('button','採用'),reject=node('button','要修正','secondary'),zoom=node('button','画像を拡大','secondary');actions.append(saveButton,generate,accept,reject,zoom);
+    saveButton.setAttribute('aria-label','修正内容を保存');accept.setAttribute('aria-label','この候補を採用する');
+    const history=node('details'),historyTitle=node('summary','最新テイクの指示'),historyText=node('pre');history.append(historyTitle,historyText);
+    const keyLabel=node('p',ref.key,'muted');const jobs=node('div');root.append(title,keyLabel,status,generation,images,label,unsaved,actions,history,jobs);$('character-grid').append(root);
+    const card={root,keyLabel,status,generation,sketch,image,empty,select,prompt,unsaved,saveButton,generate,accept,reject,zoom,historyText,jobs,ref,dirty:false,displayVersion:ref.page?.version??null,displayRevision:ref.revision,round:null};cards.set(ref.id,card);
     prompt.addEventListener('input',()=>{if(!card.dirty){card.editVersion=card.displayVersion;card.editRevision=card.displayRevision;}card.dirty=true;card.unsaved.textContent='修正内容は未保存です';});
     saveButton.addEventListener('click',command(card,async()=>{await save(card);notice('修正内容を保存しました。');}));
     generate.addEventListener('click',command(card,async()=>{await save(card);await operation('character-generate:'+ref.id,async()=>({url:`/api/projects/${state.project}/characters/generate`,body:{reference_ids:[ref.id]}}));notice('生成依頼を受け付けました。画像は完了後に表示します。');}));
@@ -321,15 +329,15 @@ async function charactersScreen() {
   }
   function paint(card){const ref=card.ref,p=ref.page,c=p?.candidates.find(c=>c.id===card.select.value);const active=p&&p.jobs.some(j=>['queued','running','retry_wait','unknown'].includes(j.state));
     const accepted=p?.candidates.find(c=>c.id===ref.selection?.candidate_id);
-    card.status.textContent=ref.selection?`採用済み：テイク${accepted?.sequence||'?'}をページ作画に使用${c&&c.id!==ref.selection.candidate_id?` ／ 表示中のテイク${c.sequence}は未採用`:'（表示中の候補）'}`:ref.selection_problem==='unavailable'?'採用画像を利用できません・再取得または再生成が必要':p?.accepted_candidate_id?'元資料更新済み・再生成が必要':p?labels[p.status]:'生成未依頼';
+    card.status.textContent=ref.selection?`採用済み：テイク${accepted?.sequence||'?'}${c&&c.id!==ref.selection.candidate_id?` ／ 表示：テイク${c.sequence}（未採用）`:''}`:ref.selection_problem==='unavailable'?'採用画像を利用できません・再取得または再生成が必要':p?.accepted_candidate_id?'元資料更新済み・再生成が必要':p?labels[p.status]:'生成未依頼';
     if(c&&c.source_reference_revision!==ref.revision)card.status.textContent+=' ／ 表示候補の元資料が古いため採用できません';
     card.generation.textContent=p?.generation_label||'生成未依頼（開始操作をしていません）';card.image.hidden=!c;card.empty.hidden=!!c;card.empty.textContent=p?.latest_round_id?'今回の画像はまだありません。上の処理状況を確認してください。':'リファレンスは生成未依頼です。';card.select.hidden=!c;card.zoom.disabled=busy||!c;if(c)card.image.src=`/api/assets/${c.asset_hash}`;
-    card.generate.textContent=p?.latest_round_id?'この人物を再生成':'この人物を生成';card.generate.disabled=busy||active;card.saveButton.disabled=busy;card.accept.disabled=busy||!c||c.source_reference_revision!==ref.revision||ref.selection?.candidate_id===c?.id;card.reject.disabled=busy||!p?.latest_round_id||active;card.reject.textContent=ref.selection?'採用を解除して要修正にする':'要修正にする';
+    card.generate.textContent=p?.latest_round_id?'再生成':'生成';card.generate.setAttribute('aria-label',p?.latest_round_id?'この人物を再生成':'この人物を生成');card.generate.disabled=busy||active;card.saveButton.disabled=busy;card.accept.disabled=busy||!c||c.source_reference_revision!==ref.revision||ref.selection?.candidate_id===c?.id;card.reject.disabled=busy||!p?.latest_round_id||active;card.reject.textContent=ref.selection?'採用解除・要修正':'要修正';card.reject.setAttribute('aria-label',ref.selection?'採用を解除して要修正にする':'要修正にする');card.generation.hidden=!!c&&!active;
     card.historyText.textContent=p?.latest_round?`今回の生成：テイク${p.latest_round.sequence}\nモデル：${p.latest_round.snapshot.settings.model}\n\n${p.latest_round.prompt_text}`:'生成依頼後に表示します。';
     card.jobs.replaceChildren();for(const job of p?.jobs||[]){if(job.state!=='failed')continue;const retry=node('button','失敗した生成を再試行','secondary');retry.disabled=busy;retry.addEventListener('click',command(card,()=>operation('retry:'+job.id,async()=>({url:`/api/jobs/${job.id}/retry`,body:{expected_state:'failed',explicit_extra_attempt:true}}))));card.jobs.append(retry);}
   }
   async function refresh(){if(busy)return;await checkHealth();const refs=await api(`/api/projects/${state.project}/characters`);let ready=0,internal=null;
-    for(const ref of refs){const card=cards.get(ref.id)||create(ref);card.ref=ref;internal=ref.page?.project_id||internal;if(ref.selection)ready++;card.sketch.src=`/api/assets/${ref.sketch}`;
+    for(const ref of refs){const card=cards.get(ref.id)||create(ref);card.ref=ref;card.keyLabel.hidden=refs.filter(r=>r.name===ref.name).length<2;internal=ref.page?.project_id||internal;if(ref.selection)ready++;card.sketch.src=`/api/assets/${ref.sketch}`;
       if(!card.dirty&&document.activeElement!==card.prompt){card.prompt.value=ref.page?.draft.page_prompt||'';card.displayVersion=ref.page?.version??null;card.displayRevision=ref.revision;}
       const previous=card.select.value;card.select.replaceChildren();for(const c of ref.page?.candidates||[]){if(c.availability!=='available')continue;const o=node('option',`テイク${c.sequence}・候補${c.candidate_index}${ref.selection?.candidate_id===c.id?'（採用）':''}`);o.value=c.id;card.select.append(o);}
       if(card.round!==ref.page?.latest_round_id){const latest=ref.page?.candidates.find(c=>c.round_id===ref.page.latest_round_id&&c.availability==='available');card.select.value=latest?.id||ref.selection?.candidate_id||card.select.value;}else if(Array.from(card.select.options).some(o=>o.value===previous))card.select.value=previous;

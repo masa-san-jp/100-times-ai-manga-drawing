@@ -363,6 +363,7 @@ def page_list(db, pid, status=None, cursor=0, limit=40):
             }
             | {
                 "thumbnail": candidate["thumbnail_hash"] if candidate else None,
+                "preview_take": candidate["sequence"] if candidate else None,
                 "generation_counts": page["generation_counts"],
                 "generation_label": page["generation_label"],
                 "generation_sequence": page["generation_sequence"],
