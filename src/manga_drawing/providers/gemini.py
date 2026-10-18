@@ -145,7 +145,7 @@ class GeminiProvider:
                         "generation_config": {
                             "responseModalities": ["TEXT", "IMAGE"],
                             "candidateCount": 1,
-                            "maxOutputTokens": 8192,
+                            "maxOutputTokens": 32768 if snap["settings"]["model"] == MODEL else 8192,
                             "imageConfig": {"aspectRatio": "3:4", "imageSize": "2K"},
                         },
                     }

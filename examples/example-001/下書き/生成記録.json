@@ -1,0 +1,275 @@
+{
+  "workflow": "資料登録 → リファレンス生成・採用 → 通常UIから全8ページ初回一括生成 → ページごとの採否確認待ち",
+  "max_output_tokens": 32768,
+  "candidate_count": 1,
+  "character_references": {
+    "Akihiko": {
+      "file": "キャラクターリファレンス/Akihiko/テイク01.png",
+      "sha256": "e2b46e6178ec6be219821042320ed7f1a0610e71dd0ce22a436706e050ae4f6d",
+      "selected_at": "2026-10-18T06:11:14.760427+00:00"
+    },
+    "Chinatsu": {
+      "file": "キャラクターリファレンス/Chinatsu/テイク01.png",
+      "sha256": "3086827b16eade9d9a1c4f81db4ea107a683a9a9a973e333d16780eed614f840",
+      "selected_at": "2026-10-18T06:11:14.760544+00:00"
+    },
+    "Haruna": {
+      "file": "キャラクターリファレンス/Haruna/テイク01.png",
+      "sha256": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+      "selected_at": "2026-10-18T06:11:14.760615+00:00"
+    },
+    "Tohma": {
+      "file": "キャラクターリファレンス/Tohma/テイク01.png",
+      "sha256": "dd8a7b69dfc0376b94a939300c9a94923ea63b8dcad522f826b653d734bdc345",
+      "selected_at": "2026-10-18T06:11:14.760672+00:00"
+    }
+  },
+  "pages": [
+    {
+      "page": 1,
+      "take": 1,
+      "file": "0001_テイク01.png",
+      "sha256": "63679706e3ceb183ff498a171c92c9a063b87c924b8db7bc21d3012cdaba46a2",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249082+00:00",
+      "completed_at": "2026-10-18T06:56:14.490737+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "1d8c0d2380f7c0c1b6e53a7a69e33469e38b68271450c84e013f538d98a4b17d",
+          "role": "ネーム"
+        },
+        {
+          "hash": "146425a1f392f109e87cfeb56181aa7763293d0214c22a7ed238742adf90c13b",
+          "role": "指示書"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "take": 1,
+      "file": "0002_テイク01.png",
+      "sha256": "53cd88a96f0edfdb3053f0965e04fc3a1c563d4ea44de62b095eb0afaf08c597",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249256+00:00",
+      "completed_at": "2026-10-18T06:56:14.733446+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "734450e95182ac0202359ee556c45686362bbc1d041cc4ab4583f0e1ff820476",
+          "role": "ネーム"
+        },
+        {
+          "hash": "156d6ece0ac6716012b3311ea0cb04ce498f6881e7426b9450913a3e418c6967",
+          "role": "指示書"
+        },
+        {
+          "hash": "3086827b16eade9d9a1c4f81db4ea107a683a9a9a973e333d16780eed614f840",
+          "key": "Chinatsu",
+          "role": "character"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 3,
+      "take": 1,
+      "file": "0003_テイク01.png",
+      "sha256": "967507e7e9451199a1f3f9c4cbbc017657362245bc980c102b6e1497dc0920c0",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249345+00:00",
+      "completed_at": "2026-10-18T06:56:15.000528+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "8efe4606d2f3289cbb1f94fae8eb56b5619fdb4601a7c67ccd3ca8b7ffa829f5",
+          "role": "ネーム"
+        },
+        {
+          "hash": "3c98dfe78f7f4bc17e95361db5680a718d6828377b0d7442259880fc24b3f830",
+          "role": "指示書"
+        },
+        {
+          "hash": "e2b46e6178ec6be219821042320ed7f1a0610e71dd0ce22a436706e050ae4f6d",
+          "key": "Akihiko",
+          "role": "character"
+        },
+        {
+          "hash": "3086827b16eade9d9a1c4f81db4ea107a683a9a9a973e333d16780eed614f840",
+          "key": "Chinatsu",
+          "role": "character"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 4,
+      "take": 1,
+      "file": "0004_テイク01.png",
+      "sha256": "88ede597e99b4cea7ba8196a3976ecb3fee71aa993f12ff2b1ea1f8202ef950c",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249419+00:00",
+      "completed_at": "2026-10-18T06:56:15.269499+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "7eda9c04502552699c155426c29e5b85be4c9f5074d215e9bd38673a08e41323",
+          "role": "ネーム"
+        },
+        {
+          "hash": "69d2c9aa8093aca4809e23b170759cb120831ef7f9906a9fd51cef4212b540c1",
+          "role": "指示書"
+        },
+        {
+          "hash": "e2b46e6178ec6be219821042320ed7f1a0610e71dd0ce22a436706e050ae4f6d",
+          "key": "Akihiko",
+          "role": "character"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        },
+        {
+          "hash": "dd8a7b69dfc0376b94a939300c9a94923ea63b8dcad522f826b653d734bdc345",
+          "key": "Tohma",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 5,
+      "take": 1,
+      "file": "0005_テイク01.png",
+      "sha256": "965e27ddbdda16d5f52bb51650cbecc7528e9a605a22cc3e56646de9198b11f0",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249495+00:00",
+      "completed_at": "2026-10-18T06:56:15.507682+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "97068df8ba7d7542a5dbc805f44581d2349a4c29f60fc19bd2f070375bfd4dcb",
+          "role": "ネーム"
+        },
+        {
+          "hash": "6cee50cdcf19ce2ac5f9386be5689c04ee0b8c1744a8f34c8acd80a20f605a41",
+          "role": "指示書"
+        },
+        {
+          "hash": "e2b46e6178ec6be219821042320ed7f1a0610e71dd0ce22a436706e050ae4f6d",
+          "key": "Akihiko",
+          "role": "character"
+        },
+        {
+          "hash": "3086827b16eade9d9a1c4f81db4ea107a683a9a9a973e333d16780eed614f840",
+          "key": "Chinatsu",
+          "role": "character"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        },
+        {
+          "hash": "dd8a7b69dfc0376b94a939300c9a94923ea63b8dcad522f826b653d734bdc345",
+          "key": "Tohma",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 6,
+      "take": 1,
+      "file": "0006_テイク01.png",
+      "sha256": "dd5ec89fcd41226c6e7f876ab9375628e48a7928c57eda9e1adac6c802df7b16",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249558+00:00",
+      "completed_at": "2026-10-18T06:56:15.769605+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "c0450f8fee438c45057598d0c885e8a59a89e0828fa7f06dc655ead26ef533d2",
+          "role": "ネーム"
+        },
+        {
+          "hash": "d2a8f8f6995499cea8fd3b2e0aca085f4b3179d136dde7e49819185e68b8c1df",
+          "role": "指示書"
+        },
+        {
+          "hash": "3086827b16eade9d9a1c4f81db4ea107a683a9a9a973e333d16780eed614f840",
+          "key": "Chinatsu",
+          "role": "character"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 7,
+      "take": 1,
+      "file": "0007_テイク01.png",
+      "sha256": "16a5b7f7d1648c4575bc80d4208722d3fcaa47ce46df31bf883e2173c12f3d90",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249610+00:00",
+      "completed_at": "2026-10-18T06:56:16.036124+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "8a6dd608a773d7c5987c98d49141b58c7e08f3603e203c3b21693b2a9672e46b",
+          "role": "ネーム"
+        },
+        {
+          "hash": "c69f4d2fe3c71a13fb7ecef8707dcdf299c2dbc9d4b0ec0c11ffca9202ba2950",
+          "role": "指示書"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        }
+      ]
+    },
+    {
+      "page": 8,
+      "take": 1,
+      "file": "0008_テイク01.png",
+      "sha256": "469a7220eb3d64ef5e8d2be44c0276839078d0ee2dffac87a06cd50b0ae28f1f",
+      "review": "採否未判定",
+      "requested_at": "2026-10-18T06:52:53.249663+00:00",
+      "completed_at": "2026-10-18T06:56:16.306019+00:00",
+      "model": "gemini-nano-banana-2.1",
+      "attachments": [
+        {
+          "hash": "a3055949050b86c760a515628fee40c42b4ea9d5fb3419879e8d61b2e1afab71",
+          "role": "ネーム"
+        },
+        {
+          "hash": "91f8a39f57270a31f06d92f6ca53a60dfd22aab75ac118a5e6b93f9c062f1ca8",
+          "role": "指示書"
+        },
+        {
+          "hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+          "key": "Haruna",
+          "role": "character"
+        }
+      ]
+    }
+  ],
+  "note": "公開閲覧用にアプリの候補画像をそのまま複写。採用済み書き出しではありません。"
+}
