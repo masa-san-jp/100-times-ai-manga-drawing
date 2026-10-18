@@ -22,11 +22,14 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def browser_app(cfg):
+def browser_app(cfg, request):
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(create_app(cfg), log_level="error"))
+    from dataclasses import replace
+
+    server_cfg = replace(cfg, provider=request.param) if hasattr(request, "param") else cfg
+    server = uvicorn.Server(uvicorn.Config(create_app(server_cfg), log_level="error"))
     thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
@@ -649,3 +652,20 @@ def test_workflow_overview_shows_adopted_pages_without_starting_generation(brows
     expect(page.locator("#workflow-pages")).to_contain_text("採用 2 / 2ページ")
     with connect(cfg) as db:
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("browser_app", ["gemini"], indirect=True)
+def test_real_user_settings_hide_development_controls_and_save(browser_app, cfg, tmp_path):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{base}/projects/{pid}/settings")
+    expect(page.locator("#scenario")).to_have_count(0)
+    page.locator("#project-title").fill("実利用の作品名")
+    page.locator("#save-project").click()
+    expect(page.locator("#notice")).to_contain_text("作品設定を保存しました")
+    with connect(cfg) as db:
+        assert db.execute("SELECT title FROM projects WHERE id=?", (pid,)).fetchone()[0] == "実利用の作品名"
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    assert not errors

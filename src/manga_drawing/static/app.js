@@ -71,7 +71,7 @@ async function settingsScreen() {
   for(const id of ['folder','files']) $(id).addEventListener('change',e=>importFiles(e).catch(error=>notice(error.message)));
   action('commit-import',async()=>{const result=await api(`/api/imports/${importToken}/commit`,'POST',{expected_version:expectedVersion,work_id:$('import-work')?.value||null});location.href=`/projects/${result.project_id}`;});
   action('save-project',async()=>{
-    const saved=await api(`/api/projects/${state.project}`,'PATCH',{expected_version:projectVersion,patch:{title:$('project-title').value,work_id:$('project-work').value,work_title:$('work-title').value,lifecycle:$('project-lifecycle').value,work_folder:$('work-folder').value,settings:{width:Number($('output-width').value),height:Number($('output-height').value),scenario:$('scenario').value}}});
+    const saved=await api(`/api/projects/${state.project}`,'PATCH',{expected_version:projectVersion,patch:{title:$('project-title').value,work_id:$('project-work').value,work_title:$('work-title').value,lifecycle:$('project-lifecycle').value,work_folder:$('work-folder').value,settings:{width:Number($('output-width').value),height:Number($('output-height').value),...($('scenario')?{scenario:$('scenario').value}:{})}}});
     projectVersion=saved.version;$('work-folder').value=saved.work_folder;notice('作品設定を保存しました。');
   });
   for(const button of document.querySelectorAll('.save-reference'))button.addEventListener('click',async()=>{

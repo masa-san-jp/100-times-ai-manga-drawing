@@ -21,7 +21,8 @@ TERMINAL = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "J
 class ProviderNotConfigured(DomainError):
     def __init__(self):
         super().__init__(
-            "provider_not_configured", "Geminiには明示live設定、APIキー、正の送信上限と予算単位が必要です。"
+            "provider_not_configured",
+            "Gemini接続設定が不足しています。.envのAPIキー、画像1枚の予算、送信の有効化を確認してください。",
         )
 
 

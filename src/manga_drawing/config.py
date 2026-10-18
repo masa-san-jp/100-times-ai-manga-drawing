@@ -55,17 +55,18 @@ class Config:
     def from_env(cls):
         # Read only the explicit working directory, never search parents or mutate process env.
         env = dotenv_values(Path.cwd() / ".env", interpolate=False) | dict(os.environ)
+        selected_provider = env.get("MANGA_PROVIDER") or "gemini"
         base = Path.home() / ("Library/Application Support" if sys.platform == "darwin" else ".local/share")
         return cls(
             Path(env.get("MANGA_DATA_DIR") or base / "manga-drawing").expanduser().resolve(),
-            provider=env.get("MANGA_PROVIDER") or "mock",
+            provider=selected_provider,
             enable_live=env.get("MANGA_ENABLE_LIVE") == "1",
             gemini_api_key=env.get("GEMINI_API_KEY") or "",
             live_request_limit=int(env["MANGA_LIVE_MAX_REQUESTS"])
             if env.get("MANGA_LIVE_MAX_REQUESTS")
             else None,
             live_unit_micro=budget_from_env(env),
-            poll_interval=60.0 if env.get("MANGA_PROVIDER") == "gemini" else 1.0,
+            poll_interval=60.0 if selected_provider == "gemini" else 1.0,
         )
 
     def prepare(self):

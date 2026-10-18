@@ -41,7 +41,10 @@ def test_dotenv_explicit_directory_no_interpolation_or_environment_mutation(tmp_
     child = tmp_path / "child"
     child.mkdir()
     monkeypatch.chdir(child)
-    assert Config.from_env().provider == "mock"  # Never search parent directories.
+    monkeypatch.delenv("GEMINI_API_KEY")
+    assert Config.from_env().provider == "gemini"  # Never search parent directories.
+    assert not Config.from_env().gemini_api_key
+    assert not Config.from_env().enable_live
 
 
 @pytest.mark.parametrize("dollars,expected", [("0.10", 100000), ("1.00", 1000000), ("0.123456", 123456)])
