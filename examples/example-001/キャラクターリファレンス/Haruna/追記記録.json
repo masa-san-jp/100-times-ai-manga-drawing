@@ -1,0 +1,11 @@
+{
+  "file": "キャラクターリファレンス/Haruna/使用リファレンス.png",
+  "sha256": "ba2ac47ae7f2b1513ac0e7d998bcd78f525b3c00290c74316ae994be0cb18a74",
+  "source_asset_hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+  "name": "Haruna",
+  "height_cm": 165,
+  "updated_at": "2026-10-18T09:03:34.691105+00:00",
+  "method": "imagegen: name heading in red and height annotation",
+  "source_document": "https://docs.google.com/document/d/1pzfVnZF5nxGzZ95Ugf1lwfbysnz1AsSdXJ-3pvQkFtw/edit",
+  "other_heights": "Akihiko・Chinatsu・Tohmaは指定待ち。推測しない。"
+}

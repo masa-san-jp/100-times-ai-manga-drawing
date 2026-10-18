@@ -576,6 +576,21 @@ def test_character_reference_ui_generation_review_and_page_inputs(browser_app, c
             next(a["hash"] for a in payload["attachments"] if a["role"] == "character")
             == ref["selection"]["asset_hash"]
         )
+    # A label added after generation must be both displayed and sent to drawing.
+    from manga_drawing import assets
+    from manga_drawing.db import transaction
+    from PIL import Image
+
+    with transaction(cfg) as db:
+        annotated = assets.put(cfg, db, assets.png(Image.new("RGB", (64, 64), "red")))
+        db.execute(
+            "UPDATE character_reference_selections SET asset_hash=? WHERE reference_id=?",
+            (annotated, ref["id"]),
+        )
+        payload, _, _ = snapshot(cfg, db, get(db, "pages", page_rows(cfg, pid)[0]["id"]))
+        assert next(a["hash"] for a in payload["attachments"] if a["role"] == "character") == annotated
+    page.reload()
+    expect(card.get_by_alt_text("Aのリファレンス候補")).to_have_attribute("src", f"/api/assets/{annotated}")
     for theme in ["light", "dark"]:
         page.locator("#theme").select_option(theme)
         Path("artifacts/screenshots").mkdir(parents=True, exist_ok=True)

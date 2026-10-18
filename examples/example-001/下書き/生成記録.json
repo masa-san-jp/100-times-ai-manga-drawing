@@ -1,5 +1,5 @@
 {
-  "workflow": "資料登録 → リファレンス生成・採用 → 作者の原文復元 → 全8ページをテイク3で一括生成 → 採否確認待ち",
+  "workflow": "資料登録 → リファレンス生成・採用 → ページ生成 → ユーザーによる確認・一部再生成 → 各ページの最新候補を掲載。Harunaの身長追記はページ生成後。",
   "max_output_tokens": 32768,
   "candidate_count": 1,
   "character_references": {
@@ -27,16 +27,16 @@
   "pages": [
     {
       "page": 1,
-      "take": 3,
-      "file": "0001_テイク03.png",
-      "sha256": "0c0c1726bb5b8213101168951f29a31c2ce30a9fbaea5ccc1c6b76c845a8de7c",
+      "take": 4,
+      "file": "0001_テイク04.png",
+      "sha256": "0bab6e86fc3615479c26d556064ee9dc493a8f14aae40e019fa1cb5b7ddb1e02",
       "review": "採否未判定",
-      "requested_at": "2026-10-18T07:52:01.476519+00:00",
-      "completed_at": "2026-10-18T07:56:26.058159+00:00",
+      "requested_at": "2026-10-18T08:44:01.696543+00:00",
+      "completed_at": "2026-10-18T08:46:15.480726+00:00",
       "model": "gemini-nano-banana-2.1",
-      "template_version": "author-original-v1",
+      "template_version": "author-original-v2-page-notes",
       "system_instruction_sent": false,
-      "prompt_sha256": "e035e5a26f0691e7c5eed8a0b1f97cefd426a31ef47b1d1d53c69fa2241b22b5",
+      "prompt_sha256": "ba5ea2476acbe95444456005c385afd1dc82347fef756d5750c206c1700d25d0",
       "source_prompt_number": 1,
       "attachments": [
         {
@@ -56,14 +56,15 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "a4bd46d5-9043-4125-921c-15543f5e6f8e"
     },
     {
       "page": 2,
       "take": 3,
       "file": "0002_テイク03.png",
       "sha256": "e674f22be5b54f49d29a3a96778ff7f32a30eca2d9168336806d8fc2c0db1841",
-      "review": "採否未判定",
+      "review": "採用済み",
       "requested_at": "2026-10-18T07:52:01.476659+00:00",
       "completed_at": "2026-10-18T07:56:26.317320+00:00",
       "model": "gemini-nano-banana-2.1",
@@ -94,14 +95,15 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "f301a4cf-1b3d-4aae-a061-f0c77c980bdd"
     },
     {
       "page": 3,
       "take": 3,
       "file": "0003_テイク03.png",
       "sha256": "1879b4335f2a87f902b321594b8a9ab521f140dc78ceeef4f8b1e5d7b3cd247a",
-      "review": "採否未判定",
+      "review": "採用済み",
       "requested_at": "2026-10-18T07:52:01.476742+00:00",
       "completed_at": "2026-10-18T07:56:26.561723+00:00",
       "model": "gemini-nano-banana-2.1",
@@ -137,14 +139,15 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "514d3e30-c16d-46a0-b314-09dc81107cac"
     },
     {
       "page": 4,
       "take": 3,
       "file": "0004_テイク03.png",
       "sha256": "0941ede312a8e2732f4c57d7af060b89f18140086faf9db9b135023e36cd3ba7",
-      "review": "採否未判定",
+      "review": "採用済み",
       "requested_at": "2026-10-18T07:52:01.476816+00:00",
       "completed_at": "2026-10-18T07:56:26.817247+00:00",
       "model": "gemini-nano-banana-2.1",
@@ -180,20 +183,21 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "064eb552-79d8-418e-b927-b1d83b0035e3"
     },
     {
       "page": 5,
-      "take": 3,
-      "file": "0005_テイク03.png",
-      "sha256": "52617c6dfdf1b1885f4d293f29e2157b210d9dfdb1364d88c0a04accc8edb7dd",
-      "review": "採否未判定",
-      "requested_at": "2026-10-18T07:52:01.476893+00:00",
-      "completed_at": "2026-10-18T07:56:27.089009+00:00",
+      "take": 4,
+      "file": "0005_テイク04.png",
+      "sha256": "d5192e21c9e2f2bc4d3cf6e8ab78afe9c728329a65ce44cf74ea787a33e8f31f",
+      "review": "採用済み",
+      "requested_at": "2026-10-18T08:44:21.722765+00:00",
+      "completed_at": "2026-10-18T08:46:37.101738+00:00",
       "model": "gemini-nano-banana-2.1",
-      "template_version": "author-original-v1",
+      "template_version": "author-original-v2-page-notes",
       "system_instruction_sent": false,
-      "prompt_sha256": "79a6cfbc92a0d0796023ef4447d96d8c45079c490863d9f0f156e41d3a46a3e8",
+      "prompt_sha256": "7df95a12bccb792b57c92a6aa006588291f5260a19b42d00a006e11df1243f3c",
       "source_prompt_number": 5,
       "attachments": [
         {
@@ -228,14 +232,15 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "364c5de7-ae11-4763-a037-c57e21ec3158"
     },
     {
       "page": 6,
       "take": 3,
       "file": "0006_テイク03.png",
       "sha256": "d32bd7cd6f2ae1d7026eb7ccc95295bac3f9eb13a32ecdc587b6bffbe4cff7d6",
-      "review": "採否未判定",
+      "review": "採用済み",
       "requested_at": "2026-10-18T07:52:01.476961+00:00",
       "completed_at": "2026-10-18T07:56:27.348552+00:00",
       "model": "gemini-nano-banana-2.1",
@@ -266,14 +271,15 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "cc06fbe1-c17d-469d-8841-a9fa5ef8828d"
     },
     {
       "page": 7,
       "take": 3,
       "file": "0007_テイク03.png",
       "sha256": "ef0e6c5efde976df9f5f1ab4535ad4bdcc6e547fde059e169ad36e908f0b77cc",
-      "review": "採否未判定",
+      "review": "採用済み",
       "requested_at": "2026-10-18T07:52:01.477021+00:00",
       "completed_at": "2026-10-18T07:56:27.605798+00:00",
       "model": "gemini-nano-banana-2.1",
@@ -299,14 +305,15 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "c28784b1-832c-4c63-8599-033af9cf6d90"
     },
     {
       "page": 8,
       "take": 3,
       "file": "0008_テイク03.png",
       "sha256": "911c89bcd21c9cb698374adfcc5e56175096792e30c28ef651a01017a34df8bd",
-      "review": "採否未判定",
+      "review": "採用済み",
       "requested_at": "2026-10-18T07:52:01.477080+00:00",
       "completed_at": "2026-10-18T07:56:27.836538+00:00",
       "model": "gemini-nano-banana-2.1",
@@ -332,11 +339,12 @@
       "candidate_size_px": {
         "width": 1792,
         "height": 2400
-      }
+      },
+      "candidate_id": "6a081680-dd16-489e-9822-b41f82408ef4"
     }
   ],
-  "note": "公開閲覧用にアプリの候補画像をそのまま複写。採用済み書き出しではありません。",
-  "verification": "8件のAPI送信本文と復元原文が完全一致し、独自のsystemInstructionなし。8件生成成功。3ページの集中線追加・6ページの小さい人物の顔の省略等が残るため、品質合格は未判定。",
+  "note": "各ページの最新生成候補を複写。ユーザーの採否と採用中の候補は変更していません。1ページのテイク4は未採用で、採用中はテイク1です。身長追記後のリファレンスによる漫画の再生成は行っていません。",
+  "verification": "掲載画像・生成指示・添付資料・採否を実行DBと照合。テイク4にはユーザーの修正指示を含みます。",
   "prompt_source": "../../../docs/source-prompts/article-originals.json",
   "requested_final_size_px": {
     "width": 1410,
@@ -346,5 +354,18 @@
     "reference_selected_before_page_request": true,
     "reference_assets_match_published_sheets": true,
     "published_pages_match_application_candidates": true
+  },
+  "current_reference_updates": {
+    "Haruna": {
+      "file": "キャラクターリファレンス/Haruna/使用リファレンス.png",
+      "sha256": "ba2ac47ae7f2b1513ac0e7d998bcd78f525b3c00290c74316ae994be0cb18a74",
+      "source_asset_hash": "87bf7dc815261fa3be38512ec403a8dcaff36ada2ac9c1beb65f4a0a65bf54a8",
+      "name": "Haruna",
+      "height_cm": 165,
+      "updated_at": "2026-10-18T09:03:34.691105+00:00",
+      "method": "imagegen: name heading in red and height annotation",
+      "source_document": "https://docs.google.com/document/d/1pzfVnZF5nxGzZ95Ugf1lwfbysnz1AsSdXJ-3pvQkFtw/edit",
+      "other_heights": "Akihiko・Chinatsu・Tohmaは指定待ち。推測しない。"
+    }
   }
 }
