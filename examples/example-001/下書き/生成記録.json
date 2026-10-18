@@ -341,5 +341,10 @@
   "requested_final_size_px": {
     "width": 1410,
     "height": 1920
+  },
+  "verified_sequence": {
+    "reference_selected_before_page_request": true,
+    "reference_assets_match_published_sheets": true,
+    "published_pages_match_application_candidates": true
   }
 }
