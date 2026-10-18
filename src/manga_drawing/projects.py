@@ -148,12 +148,19 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                 )
                 db.execute("UPDATE reference_sets SET current_revision_id=? WHERE id=?", (revision, rid))
         for page in manifest["pages"]:
+            existing = db.execute(
+                "SELECT draft_json FROM pages WHERE project_id=? AND number=?", (pid, page["number"])
+            ).fetchone()
+            page_prompt = page["page_prompt"]
+            if page_prompt is None:
+                page_prompt = json.loads(existing[0]).get("page_prompt", "") if existing else ""
             draft = Draft(
                 name_hash=mapped[page["name"]],
                 instruction_hash=mapped[page["instructions"]],
                 characters=page["characters"],
                 scene=page["scene"],
                 directions=page["directions"],
+                page_prompt=page_prompt,
             )
             db.execute(
                 """INSERT INTO pages(id,project_id,number,draft_json) VALUES(?,?,?,?)

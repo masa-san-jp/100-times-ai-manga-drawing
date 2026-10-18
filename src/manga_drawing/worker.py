@@ -478,9 +478,16 @@ class Worker:
             if not cid:
                 break
             self.submit(cid)
-        from .export import process_export
+        from .export import process_export, sync_rejected
 
         process_export(self.cfg)
+        try:
+            sync_rejected(self.cfg)
+        except (DomainError, OSError, ValueError) as exc:
+            with transaction(self.cfg) as db:
+                db.execute(
+                    "INSERT OR REPLACE INTO system VALUES('rejected_sync_error',?)", (type(exc).__name__,)
+                )
 
     def check_assets(self):
         with transaction(self.cfg) as db:

@@ -73,13 +73,20 @@ def matching_manifest(db, pid, manifest):
             (pid,),
         )
     ]
+    if manifest.get("pages") and "take" in manifest["pages"][0]:
+        for item in expected:
+            item["take"] = get(db, "rounds", item["round_id"])["sequence"]
+            item["candidate_index"] = db.execute(
+                "SELECT j.candidate_index FROM candidates c JOIN jobs j ON j.id=c.job_id WHERE c.id=?",
+                (item["candidate_id"],),
+            ).fetchone()[0]
     return (
         len(expected) == 2
         and [p["number"] for p in expected] == [1, 2]
         and {
             key: value
             for key, value in manifest.items()
-            if key not in {"work_id", "work_title", "output_relative"}
+            if key not in {"work_id", "work_title", "output_relative", "publication_relative"}
         }
         == {
             "provider": "gemini",

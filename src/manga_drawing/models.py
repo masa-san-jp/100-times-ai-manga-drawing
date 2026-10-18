@@ -30,6 +30,7 @@ class PageInput(Strict):
     instructions: str
     characters: list[str] = Field(default_factory=list, max_length=5)
     scene: str | None = None
+    page_prompt: str | None = Field(default=None, max_length=20000)
     directions: list[Direction] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -63,6 +64,7 @@ class Draft(Strict):
     instruction_hash: str
     characters: list[str] = Field(default_factory=list, max_length=5)
     scene: str | None = None
+    page_prompt: str = Field(default="", max_length=20000)
     directions: list[Direction] = Field(default_factory=list)
     correction: str = Field(default="", max_length=20000)
     prompt_override: str | None = Field(default=None, max_length=20000)

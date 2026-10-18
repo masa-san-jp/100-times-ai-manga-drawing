@@ -110,12 +110,14 @@ def health(cfg):
             "SELECT value FROM system WHERE key='gemini_connection_verified'"
         ).fetchone()
         verified = bool(verified_row and verified_row[0] == "1")
+        rejected_error = db.execute("SELECT value FROM system WHERE key='rejected_sync_error'").fetchone()
         pending = db.execute(
             "SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id WHERE j.state IN ('queued','retry_wait') AND json_extract(r.snapshot_json,'$.settings.provider')='gemini'"
         ).fetchone()[0]
     return {
         "provider": cfg.provider,
         "live_enabled": cfg.enable_live,
+        "rejected_output_error": bool(rejected_error),
         "live_remaining_requests": max(0, cfg.live_request_limit - reserved)
         if cfg.live_request_limit is not None
         else None,
@@ -231,6 +233,10 @@ def create_app(cfg=None):
             project = get(db, "projects", pid)
             project["work_title"] = get(db, "works", project["work_id"])["title"]
             works = [dict(r) for r in db.execute("SELECT * FROM works ORDER BY created_at DESC")]
+            saved_folder = db.execute(
+                "SELECT value FROM system WHERE key=?", (f"work_folder:{project['work_id']}",)
+            ).fetchone()
+            project["work_folder"] = saved_folder[0] if saved_folder else ""
             project["references"] = projects.references(db, pid)
             project["settings"] = json.loads(project["settings_json"])
         return templates.TemplateResponse(
@@ -354,7 +360,7 @@ def create_app(cfg=None):
     @app.patch("/api/projects/{pid}")
     def patch_project(pid: str, body: Edit):
         require(
-            set(body.patch) <= {"title", "settings", "work_id", "work_title", "lifecycle"},
+            set(body.patch) <= {"title", "settings", "work_id", "work_title", "lifecycle", "work_folder"},
             "fields",
             "未定義の設定です。",
             422,
@@ -364,6 +370,29 @@ def create_app(cfg=None):
             require(project["version"] == body.expected_version)
             work_id = body.patch.get("work_id", project["work_id"])
             get(db, "works", work_id)
+            if "work_folder" in body.patch:
+                folder_value = body.patch["work_folder"]
+                require(
+                    isinstance(folder_value, str),
+                    "work_folder",
+                    "作品フォルダーの場所を入力してください。",
+                    422,
+                )
+                folder_value = folder_value.strip()
+                if folder_value:
+                    folder = Path(folder_value).expanduser()
+                    require(
+                        folder.is_absolute() and folder.is_dir() and not folder.is_symlink(),
+                        "work_folder",
+                        "存在する作品フォルダーの絶対パスを指定してください。",
+                        422,
+                    )
+                    db.execute(
+                        "INSERT OR REPLACE INTO system VALUES(?,?)",
+                        (f"work_folder:{work_id}", str(folder.resolve())),
+                    )
+                else:
+                    db.execute("DELETE FROM system WHERE key=?", (f"work_folder:{work_id}",))
             lifecycle = body.patch.get("lifecycle", project["lifecycle"])
             require(
                 lifecycle in ("active", "completed", "archived"), "lifecycle", "制作状態が不正です。", 422
@@ -591,6 +620,15 @@ def create_app(cfg=None):
 
         with connect(cfg) as db:
             row = get(db, "exports", eid)
+            manifest = json.loads(row["manifest_json"])
+            exported_pages = [
+                {
+                    "number": item["number"],
+                    "take": item.get("take") or get(db, "rounds", item["round_id"])["sequence"],
+                    "candidate": item.get("candidate_index", 1),
+                }
+                for item in manifest["pages"]
+            ]
         folder = (
             output_folder(cfg, row)
             if row["state"] == "complete" and not row["archive_path"].endswith(".zip")
@@ -599,6 +637,7 @@ def create_app(cfg=None):
         return {
             "data": {
                 "state": row["state"],
+                "pages": exported_pages,
                 "error": row["error"],
                 "folder_path": str(folder) if folder else None,
                 "open_url": f"/api/exports/{eid}/open" if folder else None,

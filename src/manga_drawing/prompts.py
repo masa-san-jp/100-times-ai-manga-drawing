@@ -7,7 +7,7 @@ from .common import DomainError, canonical, digest, require
 from .models import Draft
 from .projects import references
 
-TEMPLATE_VERSION = "mono-v1"
+TEMPLATE_VERSION = "mono-v2"
 RULES = """マンガの清書に使うモノクロの下書きを1ページ生成してください。
 ネームの枠線と吹き出しの位置・形を最優先で保持してください。
 視線誘導、人物配置、カメラアングル、演出に従ってください。
@@ -103,6 +103,7 @@ def snapshot(cfg, db, page, overrides=None):
         [
             RULES,
             "資料\n" + "\n".join(description),
+            "このページの作画指示（番号は指示書画像の番号と対応）\n" + draft["page_prompt"],
             "演出\n" + directions,
             "今回の修正\n" + draft["correction"],
             "添付一覧\n" + canonical(attachments),

@@ -322,3 +322,41 @@ def test_explicit_generation_states(cfg, tmp_path, clock, job_state, chunk_state
         page = projects.page_detail(db, item["id"])
         assert page["generation_counts"] == {expected: 1}
         assert page["generation_label"] == projects.GENERATION_LABELS[expected]
+
+
+def test_page_prompt_applies_to_first_generation_and_freezes_history(cfg, tmp_path):
+    pid, token = make_project(cfg, tmp_path, 1)
+    item = page_rows(cfg, pid)[0]
+    with transaction(cfg) as db:
+        page = get(db, "pages", item["id"])
+        projects.patch_draft(db, page, {"page_prompt": "① 横顔。② 教室を背景にする。"})
+    start(cfg, pid)
+    with connect(cfg) as db:
+        frozen = db.execute("SELECT snapshot_json FROM rounds").fetchone()[0]
+        assert "① 横顔。② 教室を背景にする。" in json.loads(frozen)["prompt"]
+        current = get(db, "pages", item["id"])
+    with transaction(cfg) as db:
+        projects.patch_draft(
+            db, current, {"page_prompt": "① 正面に変更。", "correction": "髪型を資料に合わせる。"}
+        )
+    with connect(cfg) as db:
+        assert db.execute("SELECT snapshot_json FROM rounds").fetchone()[0] == frozen
+        snap, _, _ = snapshot(cfg, db, get(db, "pages", item["id"]))
+        assert "① 正面に変更。" in snap["prompt"]
+        assert "髪型を資料に合わせる。" in snap["prompt"]
+
+
+def test_image_reimport_preserves_page_prompt_when_omitted(cfg, tmp_path):
+    pid, _ = make_project(cfg, tmp_path, 1)
+    item = page_rows(cfg, pid)[0]
+    with transaction(cfg) as db:
+        projects.patch_draft(db, get(db, "pages", item["id"]), {"page_prompt": "① 保存した作画指示"})
+    folder = tmp_path / "input-1"
+    manifest = json.loads((folder / "manifest.json").read_text())
+    token = projects.create_import(cfg)
+    for path in folder.glob("*.png"):
+        projects.upload(cfg, token, path.name, path.read_bytes())
+    report = projects.validate_import(cfg, token, manifest, pid)
+    projects.commit_import(cfg, token, report["expected_version"])
+    with connect(cfg) as db:
+        assert projects.page_detail(db, item["id"])["draft"]["page_prompt"] == "① 保存した作画指示"

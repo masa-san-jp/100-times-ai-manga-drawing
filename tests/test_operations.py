@@ -336,3 +336,82 @@ def test_detail_navigation_stays_in_episode_and_skips_number_gaps(cfg, client, t
     assert f"/pages/{pages[2]['id']}" in response.text
     assert "次のページ（8）" in response.text
     assert f"/pages/{other_page['id']}" not in response.text
+
+
+def test_export_is_inside_configured_work_folder(cfg, client, tmp_path, clock):
+    from manga_drawing import export as outputs
+
+    pid, _ = make_project(cfg, tmp_path, 1)
+    work = tmp_path / "公開作品"
+    work.mkdir()
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+    response = client.patch(
+        f"/api/projects/{pid}", json={"expected_version": version, "patch": {"work_folder": str(work)}}
+    )
+    assert response.status_code == 200
+    start(cfg, pid)
+    run(cfg, clock)
+    accept_first(cfg, pid)
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+    eid = schedule(cfg, pid, {"expected_version": version, "mode": "complete"})["export_id"]
+    process_export(cfg)
+    with connect(cfg) as db:
+        row = get(db, "exports", eid)
+    folder = outputs.output_folder(cfg, row)
+    assert folder == work / "生成結果"
+    assert (folder / "0001_テイク01.png").is_file()
+    public = json.loads((folder / "manifest.json").read_text())
+    assert "work_folder" not in public
+    assert str(tmp_path) not in (folder / "manifest.json").read_text()
+    with connect(cfg) as db:
+        db.execute("UPDATE exports SET state='running' WHERE id=?", (eid,))
+    process_export(cfg)
+    with connect(cfg) as db:
+        assert get(db, "exports", eid)["state"] == "complete"
+
+
+def test_rejected_candidates_are_named_and_restored_without_loss(cfg, tmp_path, clock):
+    from manga_drawing.export import sync_rejected
+
+    pid, _ = make_project(cfg, tmp_path, 1)
+    work = tmp_path / "公開作品"
+    work.mkdir()
+    with connect(cfg) as db:
+        db.execute("INSERT INTO system VALUES(?,?)", (f"work_folder:{pid}", str(work)))
+    start(cfg, pid)
+    run(cfg, clock)
+    item = page_rows(cfg, pid)[0]
+    with connect(cfg) as db:
+        candidate = projects.page_detail(db, item["id"])["candidates"][0]
+    planning.review(
+        cfg,
+        item["id"],
+        {
+            "expected_version": item["version"],
+            "latest_round_id": item["latest_round_id"],
+            "decision": "reject",
+            "reason": "人物の向き",
+        },
+    )
+    sync_rejected(cfg)
+    path = work / "却下した候補" / "0001_テイク01.png"
+    assert path.is_file()
+    assert "人物の向き" in (path.parent / "候補一覧.csv").read_text(encoding="utf-8-sig")
+    sync_rejected(cfg)
+    with connect(cfg) as db:
+        item = get(db, "pages", item["id"])
+    planning.review(
+        cfg,
+        item["id"],
+        {
+            "expected_version": item["version"],
+            "latest_round_id": item["latest_round_id"],
+            "decision": "accept",
+            "candidate_id": candidate["id"],
+        },
+    )
+    sync_rejected(cfg)
+    assert not path.exists()
+    assert (cfg.root / "exports" / "rejected-history" / pid / candidate["asset_hash"]).is_file()

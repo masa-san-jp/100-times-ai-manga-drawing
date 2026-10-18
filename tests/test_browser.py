@@ -414,7 +414,7 @@ def test_regeneration_placeholder_matches_current_request(browser_app, cfg, tmp_
     expect(page.locator("#plan-summary")).to_contain_text("生成依頼を受付済み")
     expect(page.locator(".thumbnail")).to_have_text("依頼受付済み・API送信待ち")
     expect(page.locator(".thumbnail img")).to_have_count(0)
-    expect(page.locator(".generation-phase")).to_contain_text("第2版")
+    expect(page.locator(".generation-phase")).to_contain_text("テイク2")
     page.locator(".page-card a").click()
     expect(page.locator("#generation-phase")).to_contain_text("API送信待ち")
     expect(page.locator("#candidate-context")).to_contain_text("過去の版")
@@ -449,7 +449,7 @@ def test_regenerated_candidate_becomes_default_and_can_be_accepted(browser_app, 
     expect(page.locator("#accept")).to_be_disabled()
     run(cfg, clock)
     expect(page.locator("#candidate-context")).to_have_text(
-        "表示中：第2版の生成結果（今回の版）", timeout=10000
+        "表示中：テイク2の生成結果（今回の版）", timeout=10000
     )
     expect(page.locator("#accept")).to_be_enabled()
     page.locator("#accept").click()
@@ -465,3 +465,32 @@ def test_regenerated_candidate_becomes_default_and_can_be_accepted(browser_app, 
     expect(page.locator("#accept")).to_be_disabled()
     page.locator("#restore-old").check()
     expect(page.locator("#accept")).to_be_enabled()
+
+
+def test_page_prompt_can_be_saved_before_initial_generation(browser_app, cfg, tmp_path):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 2)
+    items = page_rows(cfg, pid)
+    page.goto(f"{base}/pages/{items[0]['id']}")
+    expect(page.locator("#page-prompt")).to_be_visible()
+    page.locator("#page-prompt").fill("① Harunaは横顔。② 教室の背景。")
+    page.locator("#save-instructions").click()
+    expect(page.locator("#instruction-save-state")).to_have_text("保存済み")
+    with connect(cfg) as db:
+        import json
+
+        saved = json.loads(
+            db.execute("SELECT draft_json FROM pages WHERE id=?", (items[0]["id"],)).fetchone()[0]
+        )
+        assert saved["page_prompt"] == "① Harunaは横顔。② 教室の背景。"
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    page.reload()
+    expect(page.locator("#page-prompt")).to_have_value("① Harunaは横顔。② 教室の背景。")
+    page.locator("#page-prompt").fill("① Harunaの正面。")
+    page.locator("[data-page-switch]").first.click()
+    page.wait_for_url(f"**/pages/{items[1]['id']}")
+    with connect(cfg) as db:
+        saved = json.loads(
+            db.execute("SELECT draft_json FROM pages WHERE id=?", (items[0]["id"],)).fetchone()[0]
+        )
+        assert saved["page_prompt"] == "① Harunaの正面。"
