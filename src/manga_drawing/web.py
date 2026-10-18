@@ -539,9 +539,12 @@ def create_app(cfg=None):
     def progress(pid: str):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
-            counts = {}
+            counts, generation_counts = {}, {}
             for row in db.execute("SELECT id FROM pages WHERE project_id=?", (pid,)):
-                status = projects.page_detail(db, row[0])["status"]
+                page = projects.page_detail(db, row[0])
+                status = page["status"]
+                for phase, count in page["generation_counts"].items():
+                    generation_counts[phase] = generation_counts.get(phase, 0) + count
                 counts[status] = counts.get(status, 0) + 1
             batches = [
                 dict(r)
@@ -565,6 +568,10 @@ def create_app(cfg=None):
         return {
             "data": {
                 "counts": counts,
+                "generation_summary": " / ".join(
+                    f"{projects.GENERATION_LABELS[phase]} {count}件"
+                    for phase, count in generation_counts.items()
+                ),
                 "batches": batches,
                 "chunks": chunks,
                 "project_version": project["version"],

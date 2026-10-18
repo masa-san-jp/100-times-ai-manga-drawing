@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const state = {csrf:null, project:document.body.dataset.project, page:document.body.dataset.page, provider:'mock'};
-const labels = {new:'未生成',running:'生成中',review:'確認待ち',accepted:'採用済み',rejected:'要修正',unknown:'結果確認が必要',error:'エラー'};
+const labels = {new:'生成未依頼',running:'生成処理中（未完了）',review:'候補あり・採否未判定',accepted:'採用済み',rejected:'要修正',unknown:'受理・完了状況が不明',error:'生成失敗・処理停止'};
 function notice(message) { $('notice').textContent=message; $('notice').hidden=!message; }
 function node(tag,text,cls) { const e=document.createElement(tag); if(text!==undefined)e.textContent=text; if(cls)e.className=cls; return e; }
 function key() { return crypto.randomUUID(); }
@@ -23,9 +23,9 @@ async function operation(scope, prepare) {
   try {const result=await api(pending.url,'POST',pending.body,pending.key);sessionStorage.removeItem(storageKey);return {...result,_sentBody:pending.body};}
   catch(error){if(error.definitive)sessionStorage.removeItem(storageKey);throw error;}
 }
-function action(id, handler) { const e=$(id); if(!e)return; e.addEventListener('click', async()=>{
+function action(id, handler, disabled) { const e=$(id); if(!e)return; e.addEventListener('click', async()=>{
   if(e.disabled)return; e.disabled=true; notice('');
-  try {await handler();} catch(error){notice(error.message);} finally{e.disabled=false;}
+  try {await handler();} catch(error){notice(error.message);} finally{e.disabled=disabled?disabled():false;}
 }); }
 function applyTheme(value) { const dark=value==='dark'||(value==='system'&&matchMedia('(prefers-color-scheme: dark)').matches); document.documentElement.dataset.theme=dark?'dark':'light'; }
 const savedTheme=localStorage.getItem('manga-theme')||'system'; $('theme').value=savedTheme; applyTheme(savedTheme);
@@ -123,9 +123,9 @@ async function pagesScreen() {
         if(!card){
           card=node('article',undefined,'page-card');card.dataset.id=page.id;
           const link=node('a');link.href=`/pages/${page.id}`;
-          const thumb=node('div',undefined,'thumbnail');thumb.append(node('span','未生成'));
+          const thumb=node('div',undefined,'thumbnail');
           const caption=node('div',undefined,'card-caption');caption.append(node('strong',`${page.number}ページ`),node('span',''));
-          link.append(thumb,caption);
+          const phase=node('p',undefined,'generation-phase');phase.setAttribute('role','status');caption.append(phase);link.append(thumb,caption);
           const decisions=node('div',undefined,'card-decisions');
           const accept=node('button','採用する','card-accept');accept.addEventListener('click',()=>reviewPage(page.id,'accept'));
           const reject=node('button','要修正にする','secondary card-reject');reject.addEventListener('click',()=>reviewPage(page.id,'reject'));
@@ -135,39 +135,45 @@ async function pagesScreen() {
         card.querySelector('input').checked=selected.has(page.id);
         const badge=card.querySelector('.card-caption span');badge.textContent=labels[page.status];badge.className='review-status status-'+page.status;card.dataset.status=page.status;
         const accept=card.querySelector('.card-accept'), reject=card.querySelector('.card-reject');
-        accept.textContent=page.accepted_candidate_id?'採用済み':page.reviewable&&!page.review_candidate_id?'候補を比較して採用':'採用する';
+        accept.textContent=page.accepted_candidate_id?'採用済み':!page.reviewable?'今回の生成完了後に採用可能':!page.review_candidate_id?'候補を比較して採用':'採用する';
         accept.disabled=!page.reviewable||!!page.accepted_candidate_id;
         reject.textContent=page.accepted_candidate_id?'採用解除して要修正':page.status==='rejected'?'要修正に設定済み':'要修正にする';
         reject.disabled=!page.reviewable||page.status==='rejected';
+        card.querySelector('.generation-phase').textContent=(page.generation_sequence?`第${page.generation_sequence}版：`:'')+page.generation_label;
         const thumb=card.querySelector('.thumbnail');
         if(page.thumbnail && thumb.dataset.hash!==page.thumbnail){const img=node('img');img.src=`/api/assets/${page.thumbnail}`;img.alt=`${page.number}ページの候補`;img.loading='lazy';thumb.replaceChildren(img);thumb.dataset.hash=page.thumbnail;}
+        if(!page.thumbnail){thumb.replaceChildren(node('span',page.generation_label));delete thumb.dataset.hash;}
       }
       $('load-more').hidden=!next;$('empty').hidden=items.length!==0;showGenerationChoices();countSelection();
     } finally {busy=false;}
   }
   async function generate(kind) {
-    await operation('generate:'+state.project+':'+kind,async()=>{
+    $('plan-summary').textContent='生成依頼を登録中です。受付完了はまだ確認できていません。';
+    let plannedPages=null;
+    try { await operation('generate:'+state.project+':'+kind,async()=>{
       const request={kind,candidate_count:Number($('candidate-count').value)};
       if(selected.size)request.page_ids=Array.from(selected);
       const plan=await api(`/api/projects/${state.project}/plans`,'POST',request);
-      $('plan-summary').textContent=`対象${plan.pages.length}ページ・各${plan.candidate_count}候補・${plan.jobs}件 / ${plan.chunks}チャンク。${state.provider==='mock'?'模擬API・課金なし':'Gemini有料API・非同期処理'}。`+(plan.excluded.length?' 除外: '+plan.excluded.map(p=>`${p.number}ページ ${p.message}`).join(' / '):'');
+      plannedPages=plan.pages.length;
+      $('plan-summary').textContent=`${plan.pages.length}ページ・各${plan.candidate_count}候補の依頼内容を確認済み。開始依頼の受付はまだ確認できていません。`+(plan.excluded.length?' 除外: '+plan.excluded.map(p=>`${p.number}ページ ${p.message}`).join(' / '):'');
       return {url:`/api/projects/${state.project}/batches`,body:{plan_token:plan.plan_token}};
     });
+    } catch(error){$('plan-summary').textContent=error.definitive?'生成依頼を開始できませんでした。':'生成依頼の受付状況が不明です。ページの状態を再確認してください。';throw error;}
+    $('plan-summary').textContent=`生成依頼を受付済み${plannedPages!==null?`（対象${plannedPages}ページ）`:''}。まだ生成完了ではありません。各ページにAPI送信・生成結果の状態を表示します。`;
     selected.clear();await refresh();
   }
   async function refresh() {
     await checkHealth();
     const p=await api(`/api/projects/${state.project}/progress`);
-    $('progress').textContent=Object.entries(p.counts).map(([status,count])=>`${labels[status]} ${count}`).join('　');
+    $('progress').textContent=Object.entries(p.counts).map(([status,count])=>`${labels[status]} ${count}ページ`).join('　');
     const preserveDiagnostics=(document.activeElement?.matches('input,textarea')&&($('batch-details').contains(document.activeElement)||$('chunk-details').contains(document.activeElement)))||Array.from(document.querySelectorAll('#batch-details input,#chunk-details input')).some(e=>e.dataset.edited==='true');
     if(!preserveDiagnostics){
     const box=$('batch-details');box.replaceChildren();
-    const running=p.batches.reduce((n,b)=>n+b.running,0), waiting=p.batches.reduce((n,b)=>n+b.waiting,0), problems=p.batches.reduce((n,b)=>n+b.problems,0);
-    $('generation-status').textContent=running||waiting?`生成中 ${running}件・待機中 ${waiting}件。完了するとページに候補画像を表示します。`:problems?'生成できなかった処理があります。該当ページと下の対応欄を確認してください。':'進行中の生成はありません。候補画像の採否は各ページで判定してください。';
+    $('generation-status').textContent=p.generation_summary||'生成するページは登録されていません。';
     for(const batch of p.batches){
       if(!batch.waiting&&!batch.running)continue;
       const row=node('div',undefined,'diagnostic');
-      row.append(node('p',`生成中 ${batch.running}件・待機中 ${batch.waiting}件${batch.paused?'（開始を一時停止中）':''}`));
+      row.append(node('p',`送信・生成結果の処理中 ${batch.running}件・API送信前の待機中 ${batch.waiting}件${batch.paused?'（開始を一時停止中）':''}`));
       if(batch.waiting){
         const pause=node('button',batch.paused?'待機中の生成を再開':'待機中の生成を一時停止','secondary');pause.addEventListener('click',()=>api(`/api/batches/${batch.id}/pause`,'POST',{paused:!batch.paused}).then(refresh).catch(e=>notice(e.message)));row.append(pause);
         if(batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro>batch.cap_micro){
@@ -197,7 +203,7 @@ async function pagesScreen() {
   $('select-visible').addEventListener('change',()=>{for(const card of $('page-grid').children){$('select-visible').checked?selected.add(card.dataset.id):selected.delete(card.dataset.id);card.querySelector('input').checked=$('select-visible').checked;}countSelection();});
   action('select-filter',async()=>{let cursor=0;do{const r=await api(`/api/projects/${state.project}/pages?limit=100&cursor=${cursor}&status=${$('filter').value}`);r.items.forEach(p=>selected.add(p.id));cursor=r.next_cursor;}while(cursor);await load();});
   action('load-more',()=>load(false,true));
-  action('generate',()=>generate('initial'));action('regenerate',()=>generate('revision'));action('generate-extra',()=>generate('extra'));
+  action('generate',()=>generate('initial'));action('regenerate',()=>generate('revision'));action('generate-extra',()=>generate('extra'),()=>selected.size===0);
   function showExportFolder(result) {
     const button=node('button','画像フォルダーを開く','secondary');
     button.addEventListener('click',async()=>{
@@ -216,22 +222,35 @@ async function pagesScreen() {
 }
 
 async function detailScreen() {
-  let page=null, dirty=false, editVersion=null, currentCandidate=null, historyBefore=2147483647;
+  let page=null, dirty=false, editVersion=null, currentCandidate=null, userSelectedCandidate=false, autoLatestId=null, historyBefore=2147483647;
   const historyCandidates=new Map(), historyRounds=new Map();
   function markDirty(){if(!dirty)editVersion=page?.version;dirty=true;$('dirty').textContent='未保存の変更があります';}
   for(const id of ['correction','directions','prompt-override','override-enabled'])$(id).addEventListener('input',markDirty);
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   function candidate(){return [...page.candidates,...historyCandidates.values()].find(c=>c.id===$('candidate-select').value);}
-  function showCandidate(){const c=candidate();const round=c?(historyRounds.get(c.round_id)||(page.latest_round?.id===c.round_id?page.latest_round:null)):null;$('saved-round').textContent=round?`保存済み第${round.sequence}版\n却下理由: ${round.rejection_reason||'なし'}\n\n${round.prompt_text}`:'過去の版を追加表示すると、対応する送信全文を確認できます。';currentCandidate=c?.id||null;$('candidate-empty').hidden=!!c;$('candidate-image').hidden=!c;if(c){$('candidate-image').src=`/api/assets/${c.asset_hash}`;$('candidate-image').alt=c.provider==='gemini'?'Geminiの候補画像':'模擬APIの候補画像';}$('accept').disabled=!c||c.availability!=='available';}
+  function cannotAccept(){const c=candidate();return !c||c.availability!=='available'||c.id===page.accepted_candidate_id||(c.round_id!==page.latest_round_id&&!$('restore-old').checked);}
+  function showCandidate(){const c=candidate();const round=c?(historyRounds.get(c.round_id)||(page.latest_round?.id===c.round_id?page.latest_round:null)):null;$('saved-round').textContent=round?`保存済み第${round.sequence}版\n却下理由: ${round.rejection_reason||'なし'}\n\n${round.prompt_text}`:'過去の版を追加表示すると、対応する送信全文を確認できます。';currentCandidate=c?.id||null;$('candidate-empty').textContent=page.generation_label+'。今回の候補画像はまだ表示できません。';$('candidate-context').textContent=c?`表示中：第${c.sequence||'?'}版の生成結果${c.round_id!==page.latest_round_id?`（過去の版。今回の第${page.generation_sequence}版ではありません）`:'（今回の版）'}`:'';$('candidate-empty').hidden=!!c;$('candidate-image').hidden=!c;if(c){$('candidate-image').src=`/api/assets/${c.asset_hash}`;$('candidate-image').alt=c.provider==='gemini'?'Geminiの候補画像':'模擬APIの候補画像';}const isOld=!!c&&c.round_id!==page.latest_round_id;
+    $('restore-old-label').hidden=!isOld;
+    if(!isOld)$('restore-old').checked=false;
+    const alreadyAccepted=!!c&&c.id===page.accepted_candidate_id;
+    $('accept').textContent=alreadyAccepted?'この候補は採用済み':isOld?'表示中の過去候補を採用':'この候補を採用';
+    $('accept').disabled=cannotAccept();
+    $('accept-help').textContent=alreadyAccepted?'この画像はすでに採用されています。':!c?'今回の候補画像が届くと採用できます。':isOld?'表示中は過去の版です。採用する場合は上の確認欄にチェックしてください。':'';
+  }
   function patch(){return {correction:$('correction').value,directions:JSON.parse($('directions').value),prompt_override:$('override-enabled').checked?$('prompt-override').value:null};}
   async function refresh() {
     page=await api(`/api/pages/${state.page}`);
     $('revise').textContent=sessionStorage.getItem('manga-operation:revise:'+state.page)?'前回の再生成結果を確認':'修正して再生成';
+    $('generation-phase').textContent=(page.generation_sequence?`今回の生成（第${page.generation_sequence}版）：`:'')+page.generation_label;
     $('page-status').textContent=labels[page.status];$('accepted-label').textContent=page.accepted_candidate_id?'採用画像を保持しています':'';
     const select=$('candidate-select'), old=select.value||currentCandidate;select.replaceChildren();
     const unique=new Map([...page.candidates,...historyCandidates.values()].map(c=>[c.id,c]));
-    for(const c of unique.values()){const opt=node('option',`[${c.provider==='gemini'?'Gemini':'模擬'}] 第${c.sequence||'?'}版・候補${c.candidate_index||''}${c.id===page.accepted_candidate_id?'（採用）':''}${c.availability!=='available'?'（欠損）':''}`);opt.value=c.id;select.append(opt);}
-    if(unique.has(old))select.value=old;else if(page.accepted_candidate_id&&unique.has(page.accepted_candidate_id))select.value=page.accepted_candidate_id;
+    for(const c of unique.values()){const opt=node('option',`[${c.provider==='gemini'?'Gemini':'模擬'}] 第${c.sequence||'?'}版・候補${c.candidate_index||''}${c.round_id!==page.latest_round_id?'（過去の生成結果）':''}${c.id===page.accepted_candidate_id?'（採用）':''}${c.availability!=='available'?'（欠損）':''}`);opt.value=c.id;select.append(opt);}
+    const latest=page.candidates.find(c=>c.round_id===page.latest_round_id&&c.availability==='available');
+    if(latest&&latest.id!==autoLatestId){if(!$('restore-old').checked)userSelectedCandidate=false;autoLatestId=latest.id;}
+    if(userSelectedCandidate&&unique.has(old))select.value=old;
+    else if(latest)select.value=latest.id;
+    else if(page.accepted_candidate_id&&unique.has(page.accepted_candidate_id))select.value=page.accepted_candidate_id;
     showCandidate();
     const conflict=dirty&&editVersion!==page.version;$('edit-conflict').hidden=!conflict;if(conflict){$('dirty').textContent='別の画面で更新されています。編集内容を残して競合を確認してください。';$('conflict-saved').textContent=JSON.stringify(page.draft,null,2);}
     if(!dirty){editVersion=page.version;$('correction').value=page.draft.correction;$('directions').value=JSON.stringify(page.draft.directions,null,2);$('override-enabled').checked=page.draft.prompt_override!==null;$('prompt-override').value=page.draft.prompt_override||'';}
@@ -248,13 +267,14 @@ async function detailScreen() {
     try{await save();location.href=link.href;}catch(error){notice('移動する前に修正を保存できませんでした。'+error.message);}
   });
   action('save-draft',save);
-  action('accept',()=>decide('accept'));
+  action('accept',()=>decide('accept'),cannotAccept);
   action('reject-save',async()=>{if(dirty)await save();await decide('reject');});
   action('revise',async()=>{const result=await operation('revise:'+state.page,async()=>({url:`/api/pages/${state.page}/revise-and-generate`,body:{expected_version:editVersion,latest_round_id:page.latest_round_id,draft_patch:patch(),reason:$('reason').value,clear_accepted:$('clear-accepted').checked}}));const unchanged=JSON.stringify(patch())===JSON.stringify(result._sentBody.draft_patch);if(unchanged){dirty=false;$('dirty').textContent='保存済み';}else{dirty=true;notice('前回の再生成結果を確認しました。新しい編集内容は未保存のまま保持しています。');}await refresh();});
   action('preview-prompt',async()=>{const p=await api(`/api/pages/${state.page}/prompt`);if($('override-enabled').checked&&dirty&&!confirm('編集中の全文を保存済みの指示で置き換えますか？'))return;$('prompt-override').value=p.prompt;$('attachments').textContent='添付: '+p.attachments.map(a=>a.role+(a.key?' '+a.key:'')).join('、');markDirty();});
   action('copy-reason',()=>{$('correction').value+='\n'+$('reason').value;markDirty();});
   action('history-more',async()=>{const rows=await api(`/api/pages/${state.page}/history?before=${historyBefore}`);for(const r of rows){historyRounds.set(r.id,r);for(const c of r.candidates)historyCandidates.set(c.id,{...c,round_id:r.id,sequence:r.sequence});}if(rows.length)historyBefore=rows.at(-1).sequence;else $('history-more').hidden=true;await refresh();});
-  $('candidate-select').addEventListener('change',showCandidate);
+  $('candidate-select').addEventListener('change',()=>{userSelectedCandidate=true;$('restore-old').checked=false;showCandidate();});
+  $('restore-old').addEventListener('change',showCandidate);
   $('source-select').addEventListener('change',()=>{$('source-image').src=`/api/assets/${$('source-select').value==='name'?page.draft.name_hash:page.draft.instruction_hash}`;$('source-image').alt=$('source-select').value==='name'?'入力のネーム画像':'入力の指示書画像';});
   action('enlarge',()=>{const c=candidate();if(c){$('zoom').querySelector('img').src=`/api/assets/${c.asset_hash}`;$('zoom').showModal();}});
   await refresh();return refresh;

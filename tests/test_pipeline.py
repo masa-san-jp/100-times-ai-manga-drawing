@@ -289,3 +289,36 @@ def test_import_receipt_and_paths(cfg, tmp_path):
     oversized = Image.new("1", (8000, 5001))
     with pytest.raises(DomainError):
         decode(png(oversized))
+
+
+@pytest.mark.parametrize(
+    "job_state,chunk_state,paused,expected",
+    [
+        ("queued", None, 0, "queued"),
+        ("queued", None, 1, "paused"),
+        ("running", "prepared", 0, "queued"),
+        ("running", "uploading", 0, "sending"),
+        ("running", "submitting", 0, "sending"),
+        ("running", "submitted", 0, "submitted"),
+        ("running", "fetching", 0, "fetching"),
+        ("retry_wait", None, 0, "retry_wait"),
+        ("unknown", "unknown", 0, "unknown"),
+        ("failed", "failed", 0, "failed"),
+    ],
+)
+def test_explicit_generation_states(cfg, tmp_path, clock, job_state, chunk_state, paused, expected):
+    pid, _ = make_project(cfg, tmp_path, 1)
+    item = page_rows(cfg, pid)[0]
+    with connect(cfg) as db:
+        assert projects.page_detail(db, item["id"])["generation_counts"] == {"not_requested": 1}
+    start(cfg, pid)
+    if chunk_state:
+        Worker(cfg, clock).prepare()
+    with connect(cfg) as db:
+        db.execute("UPDATE jobs SET state=?", (job_state,))
+        db.execute("UPDATE batches SET paused=?", (paused,))
+        if chunk_state:
+            db.execute("UPDATE chunks SET state=?", (chunk_state,))
+        page = projects.page_detail(db, item["id"])
+        assert page["generation_counts"] == {expected: 1}
+        assert page["generation_label"] == projects.GENERATION_LABELS[expected]

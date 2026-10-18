@@ -214,6 +214,67 @@ def references(db, pid):
     return out
 
 
+GENERATION_LABELS = {
+    "not_requested": "生成未依頼（開始操作をしていません）",
+    "queued": "依頼受付済み・API送信待ち",
+    "paused": "依頼受付済み・送信開始を一時停止中",
+    "sending": "APIへ送信中（受理は未確認）",
+    "submitted": "API受理済み・生成結果待ち",
+    "fetching": "生成完了・画像を取得して保存中",
+    "retry_wait": "送信失敗・自動再試行の開始待ち",
+    "complete": "生成完了・画像保存済み",
+    "failed": "生成失敗・処理停止中",
+    "unknown": "APIの受理・完了状況が不明（要確認）",
+}
+
+
+def generation_progress(db, page):
+    rows = db.execute(
+        """SELECT j.state,b.paused,c.state chunk_state FROM jobs j
+        JOIN batches b ON b.id=j.batch_id LEFT JOIN attempts a ON a.id=j.active_attempt_id
+        LEFT JOIN chunks c ON c.id=a.chunk_id WHERE j.round_id=? ORDER BY j.candidate_index""",
+        (page["latest_round_id"],),
+    ).fetchall()
+    counts = {}
+    for job in rows:
+        state = job["state"]
+        if state == "queued":
+            phase = "paused" if job["paused"] else "queued"
+        elif state == "running":
+            phase = {
+                "prepared": "queued",
+                "uploading": "sending",
+                "submitting": "sending",
+                "submitted": "submitted",
+                "fetching": "fetching",
+                "unknown": "unknown",
+                "failed": "failed",
+            }.get(job["chunk_state"], "unknown")
+        else:
+            phase = {
+                "succeeded": "complete",
+                "retry_wait": "retry_wait",
+                "failed": "failed",
+                "unknown": "unknown",
+            }.get(state, "unknown")
+        if job["paused"] and (
+            state in ("queued", "retry_wait") or job["chunk_state"] in ("prepared", "uploading")
+        ):
+            phase = "paused"
+        counts[phase] = counts.get(phase, 0) + 1
+    if not counts:
+        counts = {"not_requested": 1}
+    label = " / ".join(
+        f"{GENERATION_LABELS[phase]}" + (f" {count}件" if len(rows) > 1 else "")
+        for phase, count in counts.items()
+    )
+    return {
+        "generation_counts": counts,
+        "generation_label": label,
+        "generation_sequence": page["latest_round"]["sequence"] if page["latest_round"] else None,
+    }
+
+
 def page_detail(db, page_id):
     page = get(db, "pages", page_id)
     page["draft"] = json.loads(page.pop("draft_json"))
@@ -254,6 +315,7 @@ def page_detail(db, page_id):
     else:
         status = "new"
     page["status"] = status
+    page.update(generation_progress(db, page))
     return page
 
 
@@ -282,6 +344,9 @@ def page_list(db, pid, status=None, cursor=0, limit=40):
             }
             | {
                 "thumbnail": candidate["thumbnail_hash"] if candidate else None,
+                "generation_counts": page["generation_counts"],
+                "generation_label": page["generation_label"],
+                "generation_sequence": page["generation_sequence"],
                 "review_candidate_id": latest_candidates[0]["id"] if len(latest_candidates) == 1 else None,
                 "reviewable": bool(latest_candidates)
                 and not any(

@@ -70,7 +70,7 @@ def test_browser_import_review_regenerate_and_themes(browser_app, cfg, tmp_path,
     expect(page.locator("#plan-summary")).to_contain_text("対象3ページ")
     run(cfg, clock)
     page.reload()
-    expect(page.locator(".card-caption span").first).to_have_text("確認待ち")
+    expect(page.locator(".card-caption span").first).to_have_text("候補あり・採否未判定")
     page.locator(".page-card a").first.click()
     expect(page.locator("#candidate-select option")).to_have_count(1)
     page.locator("#accept").focus()
@@ -305,7 +305,7 @@ def test_list_review_and_detail_page_navigation(browser_app, cfg, tmp_path, cloc
     page.goto(f"{base}/projects/{pid}")
     cards = page.locator(".page-card")
     expect(cards.first.locator(".generation-choice")).to_be_hidden()
-    expect(cards.first.locator(".review-status")).to_have_text("確認待ち")
+    expect(cards.first.locator(".review-status")).to_have_text("候補あり・採否未判定")
     cards.first.locator(".card-accept").click()
     expect(cards.first.locator(".review-status")).to_have_text("採用済み")
     expect(cards.first.locator(".card-accept")).to_be_disabled()
@@ -386,6 +386,82 @@ def test_instruction_default_and_simple_generation_status(browser_app, cfg, tmp_
     expect(page.locator("#source-image")).to_have_attribute("src", f"/api/assets/{instruction}")
     expect(page.locator("#save-draft")).to_have_text("修正内容を保存")
     page.goto(f"{base}/projects/{pid}")
-    expect(page.locator("#generation-status")).to_contain_text("進行中の生成はありません")
+    expect(page.locator("#generation-status")).to_contain_text("生成完了・画像保存済み")
     expect(page.locator("#recovery-details")).to_be_hidden()
     expect(page.locator("#batch-details")).to_be_empty()
+
+
+def test_regeneration_placeholder_matches_current_request(browser_app, cfg, tmp_path, clock):
+    from manga_drawing import planning, projects
+
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    item = page_rows(cfg, pid)[0]
+    planning.review(
+        cfg,
+        item["id"],
+        {
+            "expected_version": item["version"],
+            "latest_round_id": item["latest_round_id"],
+            "decision": "reject",
+        },
+    )
+    page.goto(f"{base}/projects/{pid}")
+    expect(page.locator(".thumbnail img")).to_have_count(1)
+    page.locator("#regenerate").click()
+    expect(page.locator("#plan-summary")).to_contain_text("生成依頼を受付済み")
+    expect(page.locator(".thumbnail")).to_have_text("依頼受付済み・API送信待ち")
+    expect(page.locator(".thumbnail img")).to_have_count(0)
+    expect(page.locator(".generation-phase")).to_contain_text("第2版")
+    page.locator(".page-card a").click()
+    expect(page.locator("#generation-phase")).to_contain_text("API送信待ち")
+    expect(page.locator("#candidate-context")).to_contain_text("過去の版")
+    run(cfg, clock)
+    page.reload()
+    expect(page.locator("#generation-phase")).to_contain_text("生成完了・画像保存済み")
+    with connect(cfg) as db:
+        assert projects.page_detail(db, item["id"])["generation_counts"] == {"complete": 1}
+
+
+def test_regenerated_candidate_becomes_default_and_can_be_accepted(browser_app, cfg, tmp_path, clock):
+    from manga_drawing import planning
+    from manga_drawing.common import uid
+
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    item = page_rows(cfg, pid)[0]
+    planning.revise_and_generate(
+        cfg,
+        item["id"],
+        {
+            "expected_version": item["version"],
+            "latest_round_id": item["latest_round_id"],
+            "draft_patch": {"correction": "向きを直す"},
+        },
+        uid(),
+    )
+    page.goto(f"{base}/pages/{item['id']}")
+    expect(page.locator("#candidate-context")).to_contain_text("過去の版")
+    expect(page.locator("#accept")).to_be_disabled()
+    run(cfg, clock)
+    expect(page.locator("#candidate-context")).to_have_text(
+        "表示中：第2版の生成結果（今回の版）", timeout=10000
+    )
+    expect(page.locator("#accept")).to_be_enabled()
+    page.locator("#accept").click()
+    expect(page.locator("#page-status")).to_have_text("採用済み")
+    expect(page.locator("#accept")).to_have_text("この候補は採用済み")
+    expect(page.locator("#accept")).to_be_disabled()
+    with connect(cfg) as db:
+        old = db.execute(
+            "SELECT c.id FROM candidates c JOIN jobs j ON j.id=c.job_id JOIN rounds r ON r.id=j.round_id WHERE r.sequence=1"
+        ).fetchone()[0]
+    page.locator("#candidate-select").select_option(old)
+    expect(page.locator("#restore-old-label")).to_be_visible()
+    expect(page.locator("#accept")).to_be_disabled()
+    page.locator("#restore-old").check()
+    expect(page.locator("#accept")).to_be_enabled()
