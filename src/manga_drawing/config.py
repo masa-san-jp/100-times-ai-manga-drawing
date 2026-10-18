@@ -4,6 +4,7 @@ import contextlib
 import fcntl
 import os
 from pathlib import Path
+import re
 import secrets
 import sys
 import threading
@@ -14,6 +15,26 @@ from dotenv import dotenv_values
 _locks: dict[str, threading.RLock] = {}
 _guard = threading.Lock()
 _local = threading.local()
+
+
+def budget_from_env(env):
+    """Accept dollars at the configuration boundary; retain integer accounting internally."""
+    dollar_key = "MANGA_LIVE_BUDGET_PER_IMAGE_USD"
+    legacy_key = "MANGA_LIVE_UNIT_RESERVE_MICRO_USD"
+    # An explicitly exported legacy value still takes precedence over a local file.
+    if dollar_key not in os.environ and legacy_key in os.environ:
+        return int(os.environ[legacy_key] or "0")
+    value = (env.get(dollar_key) or "").strip()
+    if not value:
+        return int(env.get(legacy_key) or "0")
+    message = "MANGA_LIVE_BUDGET_PER_IMAGE_USDは米ドル額で入力してください（例：0.10）。"
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,6})?", value):
+        raise ValueError(message)
+    whole, _, fraction = value.partition(".")
+    amount = int(whole) * 1_000_000 + int(fraction.ljust(6, "0"))
+    if amount <= 0:
+        raise ValueError(message)
+    return amount
 
 
 @dataclass(frozen=True)
@@ -41,7 +62,7 @@ class Config:
             enable_live=env.get("MANGA_ENABLE_LIVE") == "1",
             gemini_api_key=env.get("GEMINI_API_KEY") or "",
             live_request_limit=int(env.get("MANGA_LIVE_MAX_REQUESTS") or "0"),
-            live_unit_micro=int(env.get("MANGA_LIVE_UNIT_RESERVE_MICRO_USD") or "0"),
+            live_unit_micro=budget_from_env(env),
             poll_interval=60.0 if env.get("MANGA_PROVIDER") == "gemini" else 1.0,
         )
 

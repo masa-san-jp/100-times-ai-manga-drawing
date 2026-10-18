@@ -2,8 +2,9 @@
 
 from dataclasses import replace
 import json
+import pytest
 
-from manga_drawing.config import Config
+from manga_drawing.config import Config, budget_from_env
 from manga_drawing.db import connect
 from manga_drawing.maintenance import live_check
 from conftest import make_project, start
@@ -18,6 +19,7 @@ def test_dotenv_explicit_directory_no_interpolation_or_environment_mutation(tmp_
         "MANGA_DATA_DIR",
         "MANGA_LIVE_MAX_REQUESTS",
         "MANGA_LIVE_UNIT_RESERVE_MICRO_USD",
+        "MANGA_LIVE_BUDGET_PER_IMAGE_USD",
     ):
         monkeypatch.delenv(name, raising=False)
     (tmp_path / ".env").write_text(
@@ -40,6 +42,30 @@ def test_dotenv_explicit_directory_no_interpolation_or_environment_mutation(tmp_
     child.mkdir()
     monkeypatch.chdir(child)
     assert Config.from_env().provider == "mock"  # Never search parent directories.
+
+
+@pytest.mark.parametrize("dollars,expected", [("0.10", 100000), ("1.00", 1000000), ("0.123456", 123456)])
+def test_budget_accepts_dollars_without_rounding(dollars, expected, monkeypatch):
+    monkeypatch.delenv("MANGA_LIVE_UNIT_RESERVE_MICRO_USD", raising=False)
+    assert budget_from_env({"MANGA_LIVE_BUDGET_PER_IMAGE_USD": dollars}) == expected
+
+
+@pytest.mark.parametrize("dollars", ["0", "-0.1", "NaN", "Infinity", "0.0000001", "1e6", "secret-value"])
+def test_budget_rejects_invalid_dollars_without_echo(dollars, monkeypatch):
+    monkeypatch.delenv("MANGA_LIVE_UNIT_RESERVE_MICRO_USD", raising=False)
+    with pytest.raises(ValueError) as exc:
+        budget_from_env({"MANGA_LIVE_BUDGET_PER_IMAGE_USD": dollars})
+    assert "secret-value" not in str(exc.value)
+
+
+def test_budget_environment_precedence_and_legacy_support(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MANGA_LIVE_BUDGET_PER_IMAGE_USD", raising=False)
+    (tmp_path / ".env").write_text("MANGA_LIVE_BUDGET_PER_IMAGE_USD=0.10\n")
+    monkeypatch.setenv("MANGA_LIVE_UNIT_RESERVE_MICRO_USD", "200000")
+    assert Config.from_env().live_unit_micro == 200000
+    monkeypatch.setenv("MANGA_LIVE_BUDGET_PER_IMAGE_USD", "0.30")
+    assert Config.from_env().live_unit_micro == 300000
 
 
 def test_live_check_no_client_no_storage_no_secrets(tmp_path, monkeypatch):

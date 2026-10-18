@@ -61,8 +61,8 @@ def main():
     sample.add_argument("--output", required=True)
     sample.add_argument("--pages", type=int, default=3)
     args = parser.parse_args()
-    cfg = Config.from_env()
     try:
+        cfg = Config.from_env()
         if args.command == "example":
             example(args.output, args.pages)
             return

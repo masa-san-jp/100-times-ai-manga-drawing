@@ -90,7 +90,7 @@ uv run python scripts/benchmark.py
 | MANGA_ENABLE_LIVE | 1（実送信を明示的に有効化） |
 | GEMINI_API_KEY | 利用するアカウントのキー。チャット・Git・シェル履歴へ貼らない |
 | MANGA_LIVE_MAX_REQUESTS | 保存先全体の累積要求予約数の上限。正整数 |
-| MANGA_LIVE_UNIT_RESERVE_MICRO_USD | 1要求の予算予約単位。正整数、micro USD |
+| MANGA_LIVE_BUDGET_PER_IMAGE_USD | 画像1枚に見込む費用。米ドル額をそのまま入力（例：0.10） |
 | MANGA_DATA_DIR | 保存先。mockとは別の専用ディレクトリーを推奨 |
 
 上限・予算単位の値をアプリが推測して実送信することはない。初回live検証は少数の要求と明示した予算で行い、実schema・出力・利用明細を照合する。現時点でその検証は未実施。
@@ -104,7 +104,7 @@ uv run python scripts/benchmark.py
 
 ### 設定場所と確認
 
-macOSの本作業環境では`/Users/masa/マイドライブ/Dev/100-times-ai-manga-drawing/.env`に記入する。ローカルの記入用ファイルは作成済み。キーと予算予約単位の2項目が空欄で、要求上限はT14用の3、保存先は`.data/live-acceptance`に設定している。
+macOSの本作業環境では`/Users/masa/マイドライブ/Dev/100-times-ai-manga-drawing/.env`に記入する。ローカルの記入用ファイルは作成済み。キーと画像1枚に見込むドル額の2項目が空欄で、要求上限はT14用の3、保存先は`.data/live-acceptance`に設定している。
 
 ```sh
 # リポジトリ直下で実行する。初めて設定ファイルを用意する環境だけコピー。
@@ -116,7 +116,7 @@ uv run --extra gemini manga live-check
 
 `live-check`はSDKクライアントを作らず、キー・設定値を表示せず、データを初期化しない。既存DBがあれば読取専用で累積予約数と処理中のGeminiジョブ数を確認する。未予約の待機ジョブがある場合もT14準備完了とはしない。成功はローカル設定の充足だけを意味し、キーの有効性・実モデル・利用枠の検証ではない。
 
-`MANGA_LIVE_UNIT_RESERVE_MICRO_USD`は1要求あたりの内部予算予約額で、1 USD = 1,000,000単位。実請求の強制上限ではない。ユーザーが利用条件を確認して決める値とする。
+`MANGA_LIVE_BUDGET_PER_IMAGE_USD`には、画像1枚に見込む費用を米ドルで入力する。例：`0.10`は10セント、`1.00`は1ドル。単位の換算はアプリが行う。実請求の強制上限ではなく、アプリ内の予算管理に使う額。旧設定名`MANGA_LIVE_UNIT_RESERVE_MICRO_USD`は既存環境との互換用にのみ受け付ける。
 
 設定変更は起動時に反映する。稼働中のモックをliveへ勝手に切り替えない。live確認に進む際は、同じディレクトリーからWebとworkerを再起動する。
 
