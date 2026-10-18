@@ -270,12 +270,24 @@ def page_list(db, pid, status=None, cursor=0, limit=40):
         candidate = candidate or next(
             (c for c in page["candidates"] if c["round_id"] == page["latest_round_id"]), None
         )
+        latest_candidates = [
+            c
+            for c in page["candidates"]
+            if c["round_id"] == page["latest_round_id"] and c["availability"] == "available"
+        ]
         items.append(
             {
                 k: page[k]
                 for k in ("id", "number", "version", "status", "latest_round_id", "accepted_candidate_id")
             }
-            | {"thumbnail": candidate["thumbnail_hash"] if candidate else None}
+            | {
+                "thumbnail": candidate["thumbnail_hash"] if candidate else None,
+                "review_candidate_id": latest_candidates[0]["id"] if len(latest_candidates) == 1 else None,
+                "reviewable": bool(latest_candidates)
+                and not any(
+                    j["state"] in ("queued", "running", "retry_wait", "unknown") for j in page["jobs"]
+                ),
+            }
         )
         if len(items) == limit:
             break

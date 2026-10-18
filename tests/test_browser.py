@@ -298,3 +298,78 @@ def test_library_episode_archive_reopen(browser_app, cfg, tmp_path):
         page.set_viewport_size({"width": 360, "height": 900})
         assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
         page.set_viewport_size({"width": 1280, "height": 900})
+
+
+def test_list_review_and_detail_page_navigation(browser_app, cfg, tmp_path, clock):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 3)
+    start(cfg, pid)
+    run(cfg, clock)
+    pages = page_rows(cfg, pid)
+    page.goto(f"{base}/projects/{pid}")
+    cards = page.locator(".page-card")
+    expect(cards.first.locator(".generation-choice")).to_be_hidden()
+    expect(cards.first.locator(".review-status")).to_have_text("確認待ち")
+    cards.first.locator(".card-accept").click()
+    expect(cards.first.locator(".review-status")).to_have_text("採用済み")
+    expect(cards.first.locator(".card-accept")).to_be_disabled()
+    cards.nth(1).locator(".card-reject").click()
+    expect(cards.nth(1).locator(".review-status")).to_have_text("要修正")
+    page.locator("#batch-selection summary").click()
+    expect(cards.first.locator(".generation-choice")).to_be_visible()
+    cards.first.locator("input").check()
+    expect(page.locator("#selection-count")).to_contain_text("指定した1ページ")
+    expect(cards.first.locator(".review-status")).to_have_text("採用済み")
+    page.locator("#filter").select_option("rejected")
+    expect(cards).to_have_count(1)
+    expect(page.locator("#selection-count")).to_contain_text("該当する全ページ")
+    page.goto(f"{base}/pages/{pages[0]['id']}")
+    expect(page.locator("[data-page-switch]").first).to_contain_text("次のページ（2）")
+    expect(page.get_by_text("最初のページ", exact=True)).to_have_count(2)
+    page.locator("#correction").fill("移動前に保存する修正")
+    page.locator("[data-page-switch]").first.click()
+    page.wait_for_url(f"**/pages/{pages[1]['id']}")
+    expect(page.locator("[data-page-switch]").first).to_contain_text("前のページ（1）")
+    with connect(cfg) as db:
+        from manga_drawing import projects
+
+        assert projects.page_detail(db, pages[0]["id"])["draft"]["correction"] == "移動前に保存する修正"
+    page.locator("[data-page-switch]").nth(1).click()
+    page.wait_for_url(f"**/pages/{pages[2]['id']}")
+    expect(page.get_by_text("最後のページ", exact=True)).to_have_count(2)
+    for mode in ("light", "dark"):
+        page.goto(f"{base}/projects/{pid}")
+        page.locator("#theme").select_option(mode)
+        page.screenshot(path=f"artifacts/screenshots/review-list-{mode}-1280.png", full_page=True)
+        page.set_viewport_size({"width": 360, "height": 900})
+        assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+        page.set_viewport_size({"width": 1280, "height": 900})
+
+
+def test_list_requires_candidate_comparison_and_explicit_unaccept(browser_app, cfg, tmp_path, clock):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid, candidate_count=2)
+    run(cfg, clock)
+    item = page_rows(cfg, pid)[0]
+    page.goto(f"{base}/projects/{pid}")
+    page.locator(".card-accept").click()
+    page.wait_for_url(f"**/pages/{item['id']}")
+    expect(page.locator("#candidate-select option")).to_have_count(2)
+    with connect(cfg) as db:
+        assert (
+            db.execute("SELECT accepted_candidate_id FROM pages WHERE id=?", (item["id"],)).fetchone()[0]
+            is None
+        )
+    page.locator("#accept").click()
+    expect(page.locator("#page-status")).to_have_text("採用済み")
+    page.goto(f"{base}/projects/{pid}")
+    expect(page.locator(".card-reject")).to_have_text("採用解除して要修正")
+    page.locator(".card-reject").click()
+    expect(page.locator(".review-status")).to_have_text("要修正")
+    with connect(cfg) as db:
+        assert (
+            db.execute("SELECT accepted_candidate_id FROM pages WHERE id=?", (item["id"],)).fetchone()[0]
+            is None
+        )
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2

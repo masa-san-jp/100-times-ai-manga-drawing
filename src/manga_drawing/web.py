@@ -255,8 +255,23 @@ def create_app(cfg=None):
         with connect(cfg) as db:
             page = projects.page_detail(db, page_id)
             project = get(db, "projects", page["project_id"])
+            previous_page = db.execute(
+                "SELECT id,number FROM pages WHERE project_id=? AND number<? ORDER BY number DESC LIMIT 1",
+                (page["project_id"], page["number"]),
+            ).fetchone()
+            next_page = db.execute(
+                "SELECT id,number FROM pages WHERE project_id=? AND number>? ORDER BY number LIMIT 1",
+                (page["project_id"], page["number"]),
+            ).fetchone()
         return templates.TemplateResponse(
-            request=request, name="detail.html", context={"page": page, "project": project}
+            request=request,
+            name="detail.html",
+            context={
+                "page": page,
+                "project": project,
+                "previous_page": previous_page,
+                "next_page": next_page,
+            },
         )
 
     @app.get("/api/projects")

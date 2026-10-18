@@ -321,3 +321,18 @@ def test_failed_folder_export_does_not_publish_partial_pages(cfg, tmp_path, cloc
     with connect(cfg) as db:
         assert get(db, "exports", eid)["state"] == "complete"
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+def test_detail_navigation_stays_in_episode_and_skips_number_gaps(cfg, client, tmp_path):
+    pid, _ = make_project(cfg, tmp_path, 3)
+    other, _ = make_project(cfg, tmp_path, 1)
+    pages = page_rows(cfg, pid)
+    other_page = page_rows(cfg, other)[0]
+    with connect(cfg) as db:
+        db.execute("UPDATE pages SET number=8 WHERE id=?", (pages[2]["id"],))
+    response = client.get(f"/pages/{pages[1]['id']}")
+    assert response.status_code == 200
+    assert f"/pages/{pages[0]['id']}" in response.text
+    assert f"/pages/{pages[2]['id']}" in response.text
+    assert "次のページ（8）" in response.text
+    assert f"/pages/{other_page['id']}" not in response.text

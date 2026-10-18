@@ -78,8 +78,29 @@ async function settingsScreen() {
 }
 
 async function pagesScreen() {
-  const selected=new Set(); let next=null, loaded=40, busy=false;
-  function countSelection(){ $('selection-count').textContent=`${selected.size}ページを選択`; }
+  const selected=new Set(), visiblePages=new Map(); let next=null, loaded=40, busy=false;
+  function countSelection(){
+    $('selection-count').textContent=selected.size?`生成対象：指定した${selected.size}ページ（採否判定とは別です）`:'生成対象：ボタンに該当する全ページ';
+    const boxes=Array.from(document.querySelectorAll('.generation-choice input'));
+    $('select-visible').checked=boxes.length>0&&boxes.every(box=>box.checked);
+    $('select-visible').indeterminate=boxes.some(box=>box.checked)&&!$('select-visible').checked;
+    $('generate').textContent=selected.size?'指定ページのうち未生成を生成':'未生成ページを生成';
+    $('regenerate').textContent=selected.size?'指定ページのうち要修正を再生成':'要修正ページをまとめて再生成';
+    $('generate-extra').disabled=selected.size===0;
+  }
+  function showGenerationChoices(){for(const label of document.querySelectorAll('.generation-choice'))label.hidden=!$('batch-selection').open;}
+  async function reviewPage(id,decision){
+    const page=visiblePages.get(id);
+    if(!page)return;
+    if(decision==='accept'&&!page.review_candidate_id){location.href=`/pages/${id}`;return;}
+    const card=$('page-grid').querySelector(`[data-id="${id}"]`);
+    const buttons=Array.from(card.querySelectorAll('button'));buttons.forEach(b=>b.disabled=true);
+    try {
+      await api(`/api/pages/${id}/review`,'POST',{expected_version:page.version,latest_round_id:page.latest_round_id,decision,candidate_id:decision==='accept'?page.review_candidate_id:null,clear_accepted:decision==='reject'&&!!page.accepted_candidate_id});
+      $('review-result').textContent=`${page.number}ページを${decision==='accept'?'採用済み':'要修正'}にしました。`;
+      await refresh();
+    }catch(error){notice(error.message);await load();}
+  }
   async function load(reset=false,more=false) {
     if(busy)return;busy=true;
     try {
@@ -91,7 +112,7 @@ async function pagesScreen() {
         items.push(...result.items);continuation=result.next_cursor;
         if(!continuation)break;cursor=continuation;
       }
-      next=continuation;
+      next=continuation;visiblePages.clear();items.forEach(page=>visiblePages.set(page.id,page));
       const visibleIds=new Set(items.map(p=>p.id));
       for(const card of Array.from($('page-grid').children))if(!visibleIds.has(card.dataset.id))card.remove();
       for(const page of items){
@@ -101,14 +122,24 @@ async function pagesScreen() {
           const link=node('a');link.href=`/pages/${page.id}`;
           const thumb=node('div',undefined,'thumbnail');thumb.append(node('span','未生成'));
           const caption=node('div',undefined,'card-caption');caption.append(node('strong',`${page.number}ページ`),node('span',''));
-          link.append(thumb,caption);const label=node('label');const box=node('input');box.type='checkbox';box.setAttribute('aria-label',`${page.number}ページを選択`);box.addEventListener('change',()=>{box.checked?selected.add(page.id):selected.delete(page.id);countSelection();});label.append(box,document.createTextNode(' 選択'));card.append(link,label);$('page-grid').append(card);
+          link.append(thumb,caption);
+          const decisions=node('div',undefined,'card-decisions');
+          const accept=node('button','採用する','card-accept');accept.addEventListener('click',()=>reviewPage(page.id,'accept'));
+          const reject=node('button','要修正にする','secondary card-reject');reject.addEventListener('click',()=>reviewPage(page.id,'reject'));
+          decisions.append(accept,reject);
+          const label=node('label',undefined,'generation-choice');const box=node('input');box.type='checkbox';box.setAttribute('aria-label',`${page.number}ページを生成対象にする`);box.addEventListener('change',()=>{box.checked?selected.add(page.id):selected.delete(page.id);countSelection();});label.append(box,document.createTextNode(' 生成対象にする'));card.append(link,decisions,label);$('page-grid').append(card);
         }
         card.querySelector('input').checked=selected.has(page.id);
-        card.querySelector('.card-caption span').textContent=labels[page.status];
+        const badge=card.querySelector('.card-caption span');badge.textContent=labels[page.status];badge.className='review-status status-'+page.status;card.dataset.status=page.status;
+        const accept=card.querySelector('.card-accept'), reject=card.querySelector('.card-reject');
+        accept.textContent=page.accepted_candidate_id?'採用済み':page.reviewable&&!page.review_candidate_id?'候補を比較して採用':'採用する';
+        accept.disabled=!page.reviewable||!!page.accepted_candidate_id;
+        reject.textContent=page.accepted_candidate_id?'採用解除して要修正':page.status==='rejected'?'要修正に設定済み':'要修正にする';
+        reject.disabled=!page.reviewable||page.status==='rejected';
         const thumb=card.querySelector('.thumbnail');
         if(page.thumbnail && thumb.dataset.hash!==page.thumbnail){const img=node('img');img.src=`/api/assets/${page.thumbnail}`;img.alt=`${page.number}ページの候補`;img.loading='lazy';thumb.replaceChildren(img);thumb.dataset.hash=page.thumbnail;}
       }
-      $('load-more').hidden=!next;$('empty').hidden=items.length!==0;countSelection();
+      $('load-more').hidden=!next;$('empty').hidden=items.length!==0;showGenerationChoices();countSelection();
     } finally {busy=false;}
   }
   async function generate(kind) {
@@ -151,7 +182,9 @@ async function pagesScreen() {
     }
     await load();
   }
-  $('filter').addEventListener('change',()=>load(true).catch(e=>notice(e.message)));
+  $('filter').addEventListener('change',()=>{selected.clear();load(true).catch(e=>notice(e.message));});
+  $('batch-selection').addEventListener('toggle',()=>{showGenerationChoices();if(!$('batch-selection').open){selected.clear();for(const box of document.querySelectorAll('.generation-choice input'))box.checked=false;countSelection();}});
+  action('clear-selection',async()=>{selected.clear();await load();});
   $('select-visible').addEventListener('change',()=>{for(const card of $('page-grid').children){$('select-visible').checked?selected.add(card.dataset.id):selected.delete(card.dataset.id);card.querySelector('input').checked=$('select-visible').checked;}countSelection();});
   action('select-filter',async()=>{let cursor=0;do{const r=await api(`/api/projects/${state.project}/pages?limit=100&cursor=${cursor}&status=${$('filter').value}`);r.items.forEach(p=>selected.add(p.id));cursor=r.next_cursor;}while(cursor);await load();});
   action('load-more',()=>load(false,true));
@@ -200,6 +233,11 @@ async function detailScreen() {
   async function save(){await api(`/api/pages/${state.page}/draft`,'PATCH',{expected_version:editVersion,patch:patch()});dirty=false;$('dirty').textContent='保存済み';await refresh();}
   async function decide(decision){const c=candidate();page=await api(`/api/pages/${state.page}/review`,'POST',{expected_version:page.version,latest_round_id:page.latest_round_id,decision,candidate_id:decision==='accept'?c?.id:null,reason:$('reason').value,restore:$('restore-old').checked,clear_accepted:$('clear-accepted').checked});await refresh();}
   action('rebase-edit',()=>{editVersion=page.version;$('edit-conflict').hidden=true;$('dirty').textContent='未保存の変更があります（最新内容を確認済み）';});
+  for(const link of document.querySelectorAll('[data-page-switch]'))link.addEventListener('click',async event=>{
+    if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||!dirty)return;
+    event.preventDefault();
+    try{await save();location.href=link.href;}catch(error){notice('移動する前に修正を保存できませんでした。'+error.message);}
+  });
   action('save-draft',save);
   action('accept',()=>decide('accept'));
   action('reject-save',async()=>{if(dirty)await save();await decide('reject');});
