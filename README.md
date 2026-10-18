@@ -49,11 +49,12 @@ uv run manga web
  
 ## 仕様と実装計画
 
-モック版のアプリケーションを実装しました。実APIは未接続です。下書きの試験画像でバッチ処理・採否・修正再生成を確認できます。
+モック版のアプリケーションを実装しました。Gemini接続コードも追加しましたが、実APIでの動作・作画品質は未検証です。下書きの試験画像でバッチ処理・採否・修正再生成を確認できます。
 
 - [起動と運用手順](docs/operations.md)
 - [実装結果とIssue別の状態](docs/implementation-status.md)
 - [受け入れ結果](docs/acceptance-report.md)
+- [Gemini接続の実装・オフライン検証](docs/gemini-acceptance.md)
 - [独立した実装レビュー](docs/implementation-review.md)
 - [実装担当者への引き継ぎ](docs/implementation-handoff.md)
 - [仕様設計の骨子](docs/software-design.md)

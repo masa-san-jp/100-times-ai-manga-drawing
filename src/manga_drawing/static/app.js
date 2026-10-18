@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {csrf:null, project:document.body.dataset.project, page:document.body.dataset.page};
+const state = {csrf:null, project:document.body.dataset.project, page:document.body.dataset.page, provider:'mock'};
 const labels = {new:'未生成',running:'生成中',review:'確認待ち',accepted:'採用済み',rejected:'要修正',unknown:'結果確認が必要',error:'エラー'};
 function notice(message) { $('notice').textContent=message; $('notice').hidden=!message; }
 function node(tag,text,cls) { const e=document.createElement(tag); if(text!==undefined)e.textContent=text; if(cls)e.className=cls; return e; }
@@ -32,7 +32,7 @@ const savedTheme=localStorage.getItem('manga-theme')||'system'; $('theme').value
 $('theme').addEventListener('change',()=>{localStorage.setItem('manga-theme',$('theme').value);applyTheme($('theme').value);});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>applyTheme($('theme').value));
 action('close-zoom',()=> $('zoom').close());
-async function checkHealth() { const h=await api('/api/health'); $('worker-status').textContent=h.worker_running?'ワーカー稼働中':'ワーカー停止中 · manga workerで起動'; }
+async function checkHealth() { const h=await api('/api/health'); state.provider=h.provider; $('worker-status').textContent=(h.worker_running?'ワーカー稼働中':'ワーカー停止中 · manga workerで起動')+(h.provider==='gemini'?` / ${h.live_connection_verified?'API疎通確認済':'API疎通未検証'}・残り予約可能${h.live_remaining_requests}件${h.live_limit_wait?`（累積上限のため${h.live_queued_requests}件待機）`:h.live_remaining_requests===0?'（追加予約枠なし）':''}`:''); }
 
 async function settingsScreen() {
   let importToken=null, expectedVersion=null;
@@ -110,7 +110,7 @@ async function pagesScreen() {
       const request={kind,candidate_count:Number($('candidate-count').value)};
       if(selected.size)request.page_ids=Array.from(selected);
       const plan=await api(`/api/projects/${state.project}/plans`,'POST',request);
-      $('plan-summary').textContent=`対象${plan.pages.length}ページ・各${plan.candidate_count}候補・${plan.jobs}件 / ${plan.chunks}チャンク。模擬API・課金なし。`+(plan.excluded.length?' 除外: '+plan.excluded.map(p=>`${p.number}ページ ${p.message}`).join(' / '):'');
+      $('plan-summary').textContent=`対象${plan.pages.length}ページ・各${plan.candidate_count}候補・${plan.jobs}件 / ${plan.chunks}チャンク。${state.provider==='mock'?'模擬API・課金なし':'Gemini有料API・非同期処理'}。`+(plan.excluded.length?' 除外: '+plan.excluded.map(p=>`${p.number}ページ ${p.message}`).join(' / '):'');
       return {url:`/api/projects/${state.project}/batches`,body:{plan_token:plan.plan_token}};
     });
     selected.clear();await refresh();
@@ -162,7 +162,7 @@ async function detailScreen() {
   for(const id of ['correction','directions','prompt-override','override-enabled'])$(id).addEventListener('input',markDirty);
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   function candidate(){return [...page.candidates,...historyCandidates.values()].find(c=>c.id===$('candidate-select').value);}
-  function showCandidate(){const c=candidate();const round=c?(historyRounds.get(c.round_id)||(page.latest_round?.id===c.round_id?page.latest_round:null)):null;$('saved-round').textContent=round?`保存済み第${round.sequence}版\n却下理由: ${round.rejection_reason||'なし'}\n\n${round.prompt_text}`:'過去の版を追加表示すると、対応する送信全文を確認できます。';currentCandidate=c?.id||null;$('candidate-empty').hidden=!!c;$('candidate-image').hidden=!c;if(c)$('candidate-image').src=`/api/assets/${c.asset_hash}`;$('accept').disabled=!c||c.availability!=='available';}
+  function showCandidate(){const c=candidate();const round=c?(historyRounds.get(c.round_id)||(page.latest_round?.id===c.round_id?page.latest_round:null)):null;$('saved-round').textContent=round?`保存済み第${round.sequence}版\n却下理由: ${round.rejection_reason||'なし'}\n\n${round.prompt_text}`:'過去の版を追加表示すると、対応する送信全文を確認できます。';currentCandidate=c?.id||null;$('candidate-empty').hidden=!!c;$('candidate-image').hidden=!c;if(c){$('candidate-image').src=`/api/assets/${c.asset_hash}`;$('candidate-image').alt=c.provider==='gemini'?'Geminiの候補画像':'模擬APIの候補画像';}$('accept').disabled=!c||c.availability!=='available';}
   function patch(){return {correction:$('correction').value,directions:JSON.parse($('directions').value),prompt_override:$('override-enabled').checked?$('prompt-override').value:null};}
   async function refresh() {
     page=await api(`/api/pages/${state.page}`);
@@ -170,7 +170,7 @@ async function detailScreen() {
     $('page-status').textContent=labels[page.status];$('accepted-label').textContent=page.accepted_candidate_id?'採用画像を保持しています':'';
     const select=$('candidate-select'), old=select.value||currentCandidate;select.replaceChildren();
     const unique=new Map([...page.candidates,...historyCandidates.values()].map(c=>[c.id,c]));
-    for(const c of unique.values()){const opt=node('option',`第${c.sequence||'?'}版・候補${c.candidate_index||''}${c.id===page.accepted_candidate_id?'（採用）':''}${c.availability!=='available'?'（欠損）':''}`);opt.value=c.id;select.append(opt);}
+    for(const c of unique.values()){const opt=node('option',`[${c.provider==='gemini'?'Gemini':'模擬'}] 第${c.sequence||'?'}版・候補${c.candidate_index||''}${c.id===page.accepted_candidate_id?'（採用）':''}${c.availability!=='available'?'（欠損）':''}`);opt.value=c.id;select.append(opt);}
     if(unique.has(old))select.value=old;else if(page.accepted_candidate_id&&unique.has(page.accepted_candidate_id))select.value=page.accepted_candidate_id;
     showCandidate();
     const conflict=dirty&&editVersion!==page.version;$('edit-conflict').hidden=!conflict;if(conflict){$('dirty').textContent='別の画面で更新されています。編集内容を残して競合を確認してください。';$('conflict-saved').textContent=JSON.stringify(page.draft,null,2);}

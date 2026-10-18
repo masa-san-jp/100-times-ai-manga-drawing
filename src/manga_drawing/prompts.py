@@ -31,14 +31,25 @@ SCENARIOS = {
 
 
 def provider_ready(cfg, settings):
-    if cfg.provider != "mock" or settings.get("provider", "mock") != "mock":
-        raise DomainError("provider_not_configured", "実APIは未接続です。模擬APIを使用してください。")
+    provider = settings.get("provider", cfg.provider)
+    if provider != cfg.provider or provider not in ("mock", "gemini"):
+        raise DomainError("provider_not_configured", "起動中アプリのAPI設定と一致しません。")
+    if provider == "gemini":
+        from .providers.gemini import ensure_configured
+
+        ensure_configured(cfg)
 
 
 def snapshot(cfg, db, page, overrides=None):
     project = db.execute("SELECT settings_json FROM projects WHERE id=?", (page["project_id"],)).fetchone()
     settings = (
-        {"provider": "mock", "model": "mock-batch-v1", "width": 1410, "height": 1920, "scenario": "success"}
+        {
+            "provider": cfg.provider,
+            "model": "mock-batch-v1" if cfg.provider == "mock" else "gemini-3-pro-image",
+            "width": 1410,
+            "height": 1920,
+            "scenario": "success",
+        }
         | json.loads(project[0])
         | (overrides or {})
     )
@@ -49,7 +60,12 @@ def snapshot(cfg, db, page, overrides=None):
         "未定義の生成設定です。",
         422,
     )
-    require(settings["model"] == "mock-batch-v1", "model", "モック版のモデルを指定してください。", 422)
+    require(
+        settings["model"] == ("mock-batch-v1" if cfg.provider == "mock" else "gemini-3-pro-image"),
+        "model",
+        "対応するモデルを指定してください。",
+        422,
+    )
     require(
         type(settings["width"]) is int
         and type(settings["height"]) is int

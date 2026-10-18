@@ -99,21 +99,39 @@ class ExportRequest(Strict):
 
 def health(cfg):
     with connect(cfg) as db:
-        row = db.execute("SELECT value FROM system WHERE key='heartbeat'").fetchone()
+        heartbeat_row = db.execute("SELECT value FROM system WHERE key='heartbeat'").fetchone()
+    reserved = 0
+    verified = False
+    with connect(cfg) as db:
+        row = db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()
+        reserved = int(row[0]) if row else 0
+        verified_row = db.execute(
+            "SELECT value FROM system WHERE key='gemini_connection_verified'"
+        ).fetchone()
+        verified = bool(verified_row and verified_row[0] == "1")
+        pending = db.execute(
+            "SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id WHERE j.state IN ('queued','retry_wait') AND json_extract(r.snapshot_json,'$.settings.provider')='gemini'"
+        ).fetchone()[0]
     return {
-        "provider": "mock",
-        "real_api_connected": False,
-        "worker_running": bool(row and time.time() - float(row[0]) < 30),
+        "provider": cfg.provider,
+        "live_enabled": cfg.enable_live,
+        "live_remaining_requests": max(0, cfg.live_request_limit - reserved),
+        "live_queued_requests": pending,
+        "live_limit_wait": cfg.provider == "gemini" and pending > max(0, cfg.live_request_limit - reserved),
+        "real_api_connected": cfg.provider == "gemini" and verified,
+        "live_connection_verified": cfg.provider == "gemini" and verified,
+        "worker_running": bool(heartbeat_row and time.time() - float(heartbeat_row[0]) < 30),
     }
 
 
 def create_app(cfg=None):
     cfg = cfg or Config.from_env()
     initialize(cfg)
-    app = FastAPI(title="マンガ下書きバッチ モック版", version="0.1.0")
+    app = FastAPI(title="マンガ下書きバッチ", version="0.2.0")
     app.state.cfg = cfg
     package = Path(__file__).parent
     templates = Jinja2Templates(directory=package / "templates")
+    templates.env.globals["runtime_provider"] = cfg.provider
     app.mount("/static", StaticFiles(directory=package / "static"), name="static")
 
     def csrf(session):
@@ -275,7 +293,7 @@ def create_app(cfg=None):
                 r["candidates"] = [
                     dict(c)
                     for c in db.execute(
-                        "SELECT c.* FROM candidates c JOIN jobs j ON j.id=c.job_id WHERE j.round_id=?",
+                        "SELECT c.*,json_extract(r.snapshot_json,'$.settings.provider') provider FROM candidates c JOIN jobs j ON j.id=c.job_id JOIN rounds r ON r.id=j.round_id WHERE j.round_id=?",
                         (r["id"],),
                     )
                 ]
@@ -362,7 +380,11 @@ def create_app(cfg=None):
     @app.post("/api/projects/{pid}/plans")
     def plan(pid: str, body: Plan):
         with transaction(cfg) as db:
-            return {"data": planning.make_plan(cfg, db, pid, body.model_dump(exclude_none=True))}
+            return {
+                "data": planning.make_plan(
+                    cfg, db, pid, body.model_dump(exclude_none=True, exclude_unset=True)
+                )
+            }
 
     @app.post("/api/projects/{pid}/batches", status_code=202)
     def start(pid: str, body: Start, idempotency_key: str = Header()):
@@ -376,7 +398,7 @@ def create_app(cfg=None):
     def revise(page_id: str, body: Revise, idempotency_key: str = Header()):
         return {
             "data": planning.revise_and_generate(
-                cfg, page_id, body.model_dump(exclude_none=True), idempotency_key
+                cfg, page_id, body.model_dump(exclude_none=True, exclude_unset=True), idempotency_key
             )
         }
 
@@ -396,6 +418,14 @@ def create_app(cfg=None):
         with transaction(cfg) as db:
             batch = get(db, "batches", bid)
             require(batch["cap_micro"] == body.expected_cap and body.new_cap >= batch["spent_reserved_micro"])
+            plan_settings = json.loads(batch["plan_json"])["pages"][0]["snapshot"]["settings"]
+            if plan_settings["provider"] == "gemini":
+                require(
+                    body.new_cap <= cfg.live_request_limit * batch["unit_reserve_micro"],
+                    "live_limit",
+                    "起動時の送信上限を超える枠は設定できません。",
+                    422,
+                )
             db.execute("UPDATE batches SET cap_micro=? WHERE id=?", (body.new_cap, bid))
             db.execute(
                 "INSERT INTO audit_events VALUES(?,?,?,?,?,?,?)",

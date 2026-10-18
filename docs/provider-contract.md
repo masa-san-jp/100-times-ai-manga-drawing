@@ -1,6 +1,6 @@
 # プロバイダー契約
 
-v1はmockのみを実装する。Gemini APIに接続したという実績はない。Geminiのモデル、SDK引数、実schema、利用枠、期限の確認は後続I15で行う。
+既定はmock。I15でGemini接続コードとSDKを使うオフライン契約試験を追加した。実アカウントへの送信、実応答との照合、実作画品質、T14は未検証。
 
 ## ローカル契約
 
@@ -25,6 +25,12 @@ v1はmockのみを実装する。Gemini APIに接続したという実績はな�
 
 通常はmock_delay=2秒、poll=1秒。テストではConfigと注入した時計で待ち時間を短縮する。submit後不明、結果異常、画像再取得は新しい生成を自動で開始しない。
 
-## 実APIプレースホルダー
+## Gemini接続
 
-providers/gemini.pyはProviderNotConfiguredを返す。plan/startとworkerの構成検査で実APIを拒否し、ジョブ、送信枠、SDK、ネットワークを起動しない。google-genaiはv1の依存に含めない。
+`providers/gemini.py`はgoogle-genai 2.31.0の公開APIを使う。入力画像をinlineDataとしてJSONLに固定し、Files upload → native Batch create → poll → 結果ファイルのストリーム取得を行う。モデルは`gemini-3-pro-image`、2K・3:4・1要求1画像。実アカウントのモデル提供状況は未確認。
+
+SDKの自動再試行は無効。429は明示拒否として待機し、送信応答喪失はunknownとして照合する。照合ゼロ件から未送信と断定しない。アップロードの事前障害は最大3回で停止する。ネットワーク待機中はDB書込ロックを保持しない。
+
+送信は明示live設定・キー・累積要求上限・予算単位がすべて揃った場合のみ可能。[設定と制約](operations.md#gemini接続)を参照。外部処理間隔は最短5秒、pollは60秒。生成を伴うAPIはオフライン試験では一度も呼んでいない。
+
+公開仕様の参照先：[Batch API](https://ai.google.dev/gemini-api/docs/batch-api)、[画像生成](https://ai.google.dev/gemini-api/docs/image-generation)、[Python SDK](https://googleapis.github.io/python-genai/)。ライブ受け入れ時にアカウントの提供モデル・実schema・料金を確認する。

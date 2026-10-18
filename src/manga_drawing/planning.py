@@ -36,9 +36,11 @@ def make_plan(cfg, db, pid, request):
     project = get(db, "projects", pid)
     provider_ready(cfg, json.loads(project["settings_json"]) | request.get("settings", {}))
     count = request.get("candidate_count", 1)
-    unit = request.get("unit_reserve_micro", 1)
+    unit = request.get("unit_reserve_micro", cfg.live_unit_micro if cfg.provider == "gemini" else 1)
     require(type(count) is int and 1 <= count <= 3, "candidate_count", "候補数は1〜3です。", 422)
     require(type(unit) is int and unit > 0, "budget", "送信単位は正整数で指定してください。", 422)
+    if cfg.provider == "gemini":
+        require(unit >= cfg.live_unit_micro, "budget", "起動時に指定した予算単位より小さくできません。", 422)
     kind = request.get("kind", "initial")
     require(kind in ("initial", "revision", "extra"), "kind", "不明な生成操作です。", 422)
     wanted = request.get("page_ids")
@@ -109,6 +111,21 @@ def make_plan(cfg, db, pid, request):
         "waves": math.ceil(chunks / cfg.max_external),
         "jobs": len(selected) * count,
     }
+    if cfg.provider == "gemini":
+        reserved_row = db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()
+        reserved = int(reserved_row[0]) if reserved_row else 0
+        require(
+            len(selected) * count <= cfg.live_request_limit - reserved,
+            "live_limit",
+            "保存先全体の残り送信上限が不足しています。",
+            422,
+        )
+        require(
+            len(selected) * count <= cfg.live_request_limit and cap <= cfg.live_request_limit * unit,
+            "live_limit",
+            "この実行の送信数または予算枠が起動時の上限を超えます。",
+            422,
+        )
     ident = uid()
     db.execute("INSERT INTO plans VALUES(?,?,?,?)", (ident, pid, canonical(value), time.time() + 900))
     return value | {"plan_token": token(cfg, ident)}

@@ -15,7 +15,8 @@ from .common import DomainError, atomic_write, canonical, require, timestamp, ui
 from .db import connect, get, transaction
 from .planning import receipt, save_receipt
 from .providers.base import RateLimited, SubmissionUnknown
-from .providers.mock import MockProvider
+from .providers.factory import create_provider
+from .providers.gemini import ProviderRejected
 
 
 def failpoint(name):
@@ -29,7 +30,7 @@ class Worker:
 
         provider_ready(cfg, {})
         self.cfg, self.clock = cfg, clock
-        self.provider = MockProvider(cfg, clock)
+        self.provider = create_provider(cfg, clock)
         self.last_cleanup = 0.0
 
     def heartbeat(self):
@@ -40,11 +41,17 @@ class Worker:
         """Reserve a complete chunk atomically; insufficient allowance leaves every job queued."""
         with transaction(self.cfg) as db:
             external = db.execute(
-                "SELECT COUNT(*) FROM chunks WHERE state IN ('submitting','submitted') OR (state='unknown' AND output_path IS NULL)"
+                "SELECT COUNT(DISTINCT c.id) FROM chunks c JOIN attempts a ON a.chunk_id=c.id JOIN jobs j ON j.id=a.job_id JOIN rounds r ON r.id=j.round_id WHERE json_extract(r.snapshot_json,'$.settings.provider')=? AND (c.state IN ('submitting','submitted') OR (c.state='unknown' AND c.output_path IS NULL AND COALESCE(c.last_error,'') NOT LIKE 'gemini_batch_%'))",
+                (self.cfg.provider,),
             ).fetchone()[0]
             if external >= self.cfg.max_external:
                 return None
             for batch in db.execute("SELECT * FROM batches WHERE paused=0 ORDER BY created_at").fetchall():
+                batch_provider = json.loads(batch["plan_json"])["pages"][0]["snapshot"]["settings"][
+                    "provider"
+                ]
+                if batch_provider != self.cfg.provider:
+                    continue
                 rows = db.execute(
                     """SELECT j.*,r.snapshot_json,p.number FROM jobs j
                     JOIN rounds r ON r.id=j.round_id JOIN pages p ON p.id=r.page_id
@@ -76,6 +83,17 @@ class Worker:
                 cost = len(chosen) * batch["unit_reserve_micro"]
                 if batch["spent_reserved_micro"] + cost > batch["cap_micro"]:
                     continue
+                if self.cfg.provider == "gemini":
+                    row = db.execute(
+                        "SELECT value FROM system WHERE key='gemini_reserved_requests'"
+                    ).fetchone()
+                    reserved = int(row[0]) if row else 0
+                    if reserved + len(chosen) > self.cfg.live_request_limit:
+                        continue
+                    db.execute(
+                        "INSERT OR REPLACE INTO system VALUES('gemini_reserved_requests',?)",
+                        (str(reserved + len(chosen)),),
+                    )
                 cid = uid()
                 db.execute(
                     "INSERT INTO chunks(id,batch_id,state,display_key,created_at) VALUES(?,?,'prepared',?,?)",
@@ -116,57 +134,134 @@ class Worker:
             }
 
     def submit(self, cid):
-        with self.cfg.write_lock():
-            with connect(self.cfg) as db:
-                chunk = get(db, "chunks", cid)
-                if get(db, "batches", chunk["batch_id"])["paused"]:
-                    return
-            if chunk["state"] not in ("prepared", "uploading"):
+        with connect(self.cfg) as db:
+            chunk = get(db, "chunks", cid)
+            if get(db, "batches", chunk["batch_id"])["paused"]:
                 return
-            path = self.cfg.root / "chunks" / f"{cid}.input.jsonl"
+        if chunk["state"] not in ("prepared", "uploading"):
+            return
+        if self.cfg.provider == "gemini":
+            with transaction(self.cfg) as db:
+                reserved = db.execute(
+                    "SELECT value FROM system WHERE key='gemini_reserved_requests'"
+                ).fetchone()
+                batch = get(db, "batches", chunk["batch_id"])
+                if (reserved and int(reserved[0]) > self.cfg.live_request_limit) or batch[
+                    "unit_reserve_micro"
+                ] < self.cfg.live_unit_micro:
+                    db.execute(
+                        "UPDATE chunks SET last_error='live_limit',next_poll_at=? WHERE id=?",
+                        (self.clock() + 60, cid),
+                    )
+                    db.execute("UPDATE batches SET paused=1 WHERE id=?", (batch["id"],))
+                    return
+        path = self.cfg.root / "chunks" / f"{cid}.input.jsonl"
+        try:
             h = self.provider.build_jsonl(path, self.requests(cid))
-            name = chunk["input_remote_name"] or self.provider.upload(path)
             with transaction(self.cfg) as db:
                 db.execute(
-                    "UPDATE chunks SET state='submitting',payload_path=?,payload_hash=?,input_remote_name=? WHERE id=?",
-                    (str(path.relative_to(self.cfg.root)), h, name, cid),
+                    "UPDATE chunks SET state='uploading',payload_path=?,payload_hash=? WHERE id=?",
+                    (str(path.relative_to(self.cfg.root)), h, cid),
+                )
+            name = chunk["input_remote_name"] or self.provider.upload(path)
+        except DomainError as exc:
+            self.pre_submission_failure(cid, exc.code, terminal=True)
+            return
+        except OSError:
+            self.pre_submission_failure(cid, "upload_unavailable")
+            return
+        with transaction(self.cfg) as db:
+            latest = get(db, "chunks", cid)
+            batch = get(db, "batches", latest["batch_id"])
+            db.execute("UPDATE chunks SET input_remote_name=? WHERE id=?", (name, cid))
+            if batch["paused"]:
+                return
+            if self.cfg.provider == "gemini":
+                previous = db.execute("SELECT value FROM system WHERE key='gemini_last_submit_at'").fetchone()
+                earliest = float(previous[0]) + 5 if previous else 0
+                if self.clock() < earliest:
+                    db.execute("UPDATE chunks SET next_poll_at=? WHERE id=?", (earliest, cid))
+                    return
+                db.execute(
+                    "INSERT OR REPLACE INTO system VALUES('gemini_last_submit_at',?)", (str(self.clock()),)
+                )
+            db.execute("UPDATE chunks SET state='submitting',fetch_failures=0 WHERE id=?", (cid,))
+            db.execute("UPDATE attempts SET state='submitting' WHERE chunk_id=? AND state='reserved'", (cid,))
+        failpoint("before_submit")
+        try:
+            with connect(self.cfg) as db:
+                model = json.loads(
+                    db.execute(
+                        "SELECT r.snapshot_json FROM attempts a JOIN jobs j ON j.id=a.job_id JOIN rounds r ON r.id=j.round_id WHERE a.chunk_id=? LIMIT 1",
+                        (cid,),
+                    ).fetchone()[0]
+                )["settings"]["model"]
+            remote = self.provider.submit(name, model, cid)
+            failpoint("after_submit")
+        except RateLimited:
+            with transaction(self.cfg) as db:
+                db.execute("UPDATE chunks SET state='failed',last_error='rate_limited' WHERE id=?", (cid,))
+                for a in db.execute("SELECT * FROM attempts WHERE chunk_id=?", (cid,)).fetchall():
+                    job = get(db, "jobs", a["job_id"])
+                    count = db.execute(
+                        "SELECT COUNT(*) FROM attempts WHERE job_id=?", (job["id"],)
+                    ).fetchone()[0]
+                    state = "retry_wait" if count < 3 + job["manual_allowance"] else "failed"
+                    db.execute(
+                        "UPDATE jobs SET state=?,retry_after=? WHERE id=? AND active_attempt_id=?",
+                        (
+                            state,
+                            self.clock() + 30 * 2 ** (count - 1) + random.uniform(0, 10),
+                            job["id"],
+                            a["id"],
+                        ),
+                    )
+                    db.execute(
+                        "UPDATE attempts SET state='retryable_failed',error_code='rate_limited' WHERE id=?",
+                        (a["id"],),
+                    )
+            return
+        except ProviderRejected as exc:
+            with transaction(self.cfg) as db:
+                db.execute("UPDATE chunks SET state='failed',last_error=? WHERE id=?", (exc.code, cid))
+                db.execute(
+                    "UPDATE attempts SET state='terminal_failed',error_code=? WHERE chunk_id=?",
+                    (exc.code, cid),
                 )
                 db.execute(
-                    "UPDATE attempts SET state='submitting' WHERE chunk_id=? AND state='reserved'", (cid,)
+                    "UPDATE jobs SET state='failed' WHERE active_attempt_id IN (SELECT id FROM attempts WHERE chunk_id=?)",
+                    (cid,),
                 )
-            failpoint("before_submit")
-            try:
-                remote = self.provider.submit(name, "mock-batch-v1", cid)
-                failpoint("after_submit")
-            except RateLimited:
-                with transaction(self.cfg) as db:
-                    db.execute(
-                        "UPDATE chunks SET state='failed',last_error='rate_limited' WHERE id=?", (cid,)
-                    )
-                    for a in db.execute("SELECT * FROM attempts WHERE chunk_id=?", (cid,)).fetchall():
-                        job = get(db, "jobs", a["job_id"])
-                        count = db.execute(
-                            "SELECT COUNT(*) FROM attempts WHERE job_id=?", (job["id"],)
-                        ).fetchone()[0]
-                        state = "retry_wait" if count < 3 + job["manual_allowance"] else "failed"
-                        db.execute(
-                            "UPDATE jobs SET state=?,retry_after=? WHERE id=? AND active_attempt_id=?",
-                            (
-                                state,
-                                self.clock() + 30 * 2 ** (count - 1) + random.uniform(0, 10),
-                                job["id"],
-                                a["id"],
-                            ),
-                        )
-                        db.execute(
-                            "UPDATE attempts SET state='retryable_failed',error_code='rate_limited' WHERE id=?",
-                            (a["id"],),
-                        )
-                return
-            except (SubmissionUnknown, OSError):
-                self.unknown(cid, "submission_unknown")
-                return
-            self.attach(cid, remote)
+                db.execute("UPDATE batches SET paused=1 WHERE id=?", (chunk["batch_id"],))
+            return
+        except (SubmissionUnknown, OSError):
+            self.unknown(cid, "submission_unknown")
+            return
+        self.attach(cid, remote)
+
+    def pre_submission_failure(self, cid, code, terminal=False):
+        with transaction(self.cfg) as db:
+            chunk = get(db, "chunks", cid)
+            failures = chunk["fetch_failures"] + 1
+            terminal = terminal or failures >= 3
+            db.execute(
+                "UPDATE chunks SET state=?,fetch_failures=?,last_error=?,next_poll_at=? WHERE id=?",
+                (
+                    "failed" if terminal else "uploading",
+                    failures,
+                    code,
+                    self.clock() + 30 * 2 ** (failures - 1),
+                    cid,
+                ),
+            )
+            if terminal:
+                db.execute(
+                    "UPDATE attempts SET state='terminal_failed',error_code=? WHERE chunk_id=?", (code, cid)
+                )
+                db.execute(
+                    "UPDATE jobs SET state='failed' WHERE active_attempt_id IN (SELECT id FROM attempts WHERE chunk_id=?)",
+                    (cid,),
+                )
 
     def unknown(self, cid, reason):
         with transaction(self.cfg) as db:
@@ -185,6 +280,8 @@ class Worker:
 
     def attach(self, cid, remote):
         with transaction(self.cfg) as db:
+            if self.cfg.provider == "gemini":
+                db.execute("INSERT OR REPLACE INTO system VALUES('gemini_connection_verified','1')")
             db.execute(
                 "UPDATE chunks SET state='submitted',remote_name=?,next_poll_at=0,last_error=NULL WHERE id=?",
                 (remote, cid),
@@ -199,7 +296,11 @@ class Worker:
             )
 
     def reconcile(self, chunk):
-        matches = self.provider.find(chunk["display_key"])
+        try:
+            matches = self.provider.find(chunk["display_key"])
+        except OSError:
+            self.unknown(chunk["id"], "reconcile_unavailable")
+            return
         if len(matches) == 1:
             self.attach(chunk["id"], matches[0])
         else:
@@ -291,40 +392,42 @@ class Worker:
             )
 
     def collect(self, chunk):
-        with self.cfg.write_lock():
-            try:
-                status = self.provider.poll(chunk["remote_name"])
-                if status["state"] != "complete":
-                    with transaction(self.cfg) as db:
-                        db.execute(
-                            "UPDATE chunks SET next_poll_at=? WHERE id=?",
-                            (self.clock() + self.cfg.poll_interval, chunk["id"]),
-                        )
-                    return
-                target = self.cfg.root / "chunks" / f"{chunk['id']}.result.jsonl"
-                temp = target.with_suffix(".download")
-                self.provider.fetch(status["result"], temp)
-                temp.replace(target)
+        try:
+            status = self.provider.poll(chunk["remote_name"])
+            if status["state"] == "terminal_unknown":
+                self.unknown(chunk["id"], status.get("error", "batch_terminal_unknown"))
+                return
+            if status["state"] != "complete":
                 with transaction(self.cfg) as db:
                     db.execute(
-                        "UPDATE chunks SET state='fetching',output_path=? WHERE id=?",
-                        (str(target.relative_to(self.cfg.root)), chunk["id"]),
+                        "UPDATE chunks SET next_poll_at=? WHERE id=?",
+                        (self.clock() + self.cfg.poll_interval, chunk["id"]),
                     )
-                failpoint("after_download")
-                self.ingest(chunk["id"], target)
-            except (OSError, ValueError) as e:
-                with transaction(self.cfg) as db:
-                    failures = get(db, "chunks", chunk["id"])["fetch_failures"] + 1
-                    db.execute(
-                        "UPDATE chunks SET fetch_failures=?,next_poll_at=?,last_error=?,state=? WHERE id=?",
-                        (
-                            failures,
-                            self.clock() + 30 * 2 ** (min(failures, 3) - 1),
-                            type(e).__name__,
-                            "failed" if failures >= 3 else "submitted",
-                            chunk["id"],
-                        ),
-                    )
+                return
+            target = self.cfg.root / "chunks" / f"{chunk['id']}.result.jsonl"
+            temp = target.with_suffix(".download")
+            self.provider.fetch(status["result"], temp)
+            temp.replace(target)
+            with transaction(self.cfg) as db:
+                db.execute(
+                    "UPDATE chunks SET state='fetching',output_path=? WHERE id=?",
+                    (str(target.relative_to(self.cfg.root)), chunk["id"]),
+                )
+            failpoint("after_download")
+            self.ingest(chunk["id"], target)
+        except (OSError, ValueError) as e:
+            with transaction(self.cfg) as db:
+                failures = get(db, "chunks", chunk["id"])["fetch_failures"] + 1
+                db.execute(
+                    "UPDATE chunks SET fetch_failures=?,next_poll_at=?,last_error=?,state=? WHERE id=?",
+                    (
+                        failures,
+                        self.clock() + 30 * 2 ** (min(failures, 3) - 1),
+                        type(e).__name__,
+                        "failed" if failures >= 3 else "submitted",
+                        chunk["id"],
+                    ),
+                )
 
     def tick(self):
         self.heartbeat()
@@ -341,10 +444,21 @@ class Worker:
                 )
             ]
         for chunk in chunks:
+            with connect(self.cfg) as db:
+                row = db.execute(
+                    "SELECT r.snapshot_json FROM attempts a JOIN jobs j ON j.id=a.job_id JOIN rounds r ON r.id=j.round_id WHERE a.chunk_id=? LIMIT 1",
+                    (chunk["id"],),
+                ).fetchone()
+                if row and json.loads(row[0])["settings"]["provider"] != self.cfg.provider:
+                    continue
             if chunk["state"] in ("submitting", "unknown"):
-                if chunk["last_error"] != "result_keys" and chunk["next_poll_at"] <= self.clock():
+                if (
+                    chunk["last_error"] != "result_keys"
+                    and not (chunk["last_error"] or "").startswith("gemini_batch_")
+                    and chunk["next_poll_at"] <= self.clock()
+                ):
                     self.reconcile(chunk)
-            elif chunk["state"] in ("prepared", "uploading"):
+            elif chunk["state"] in ("prepared", "uploading") and chunk["next_poll_at"] <= self.clock():
                 self.submit(chunk["id"])
             elif chunk["state"] == "fetching" and chunk["output_path"]:
                 self.ingest(chunk["id"], self.cfg.root / chunk["output_path"])
@@ -412,7 +526,31 @@ class Worker:
 
 
 def resolve(cfg, cid, request, key):
-    provider = MockProvider(cfg)
+    provider = create_provider(cfg)
+    with connect(cfg) as read_db:
+        prior = receipt(read_db, f"resolve:{cid}", key, request)
+        if prior:
+            return prior
+        original = get(read_db, "chunks", cid)
+        source = read_db.execute(
+            "SELECT r.snapshot_json FROM attempts a JOIN jobs j ON j.id=a.job_id JOIN rounds r ON r.id=j.round_id WHERE a.chunk_id=? LIMIT 1",
+            (cid,),
+        ).fetchone()
+        require(
+            source and json.loads(source[0])["settings"]["provider"] == cfg.provider,
+            "provider_mismatch",
+            "同じAPI設定で処理を照会してください。",
+            422,
+        )
+    matches, remote = [], None
+    if request.get("action") in ("attach", "reconcile"):
+        matches = (
+            [request.get("remote_name")]
+            if request["action"] == "attach"
+            else provider.find(original["display_key"])
+        )
+        if len(matches) == 1 and matches[0]:
+            remote = provider.describe(matches[0])
     with transaction(cfg) as db:
         prior = receipt(db, f"resolve:{cid}", key, request)
         if prior:
@@ -436,15 +574,11 @@ def resolve(cfg, cid, request, key):
                 )
             db.execute("UPDATE chunks SET state='failed',last_error='explicit_resend' WHERE id=?", (cid,))
         elif action in ("attach", "reconcile"):
-            matches = (
-                [request.get("remote_name")] if action == "attach" else provider.find(chunk["display_key"])
-            )
             require(len(matches) == 1 and matches[0], "unknown", "外部処理を一意に確認できません。", 422)
-            remote = provider.describe(matches[0])
             require(
                 remote
                 and remote["display_key"] == chunk["display_key"]
-                and remote["model"] == "mock-batch-v1",
+                and remote["model"] == ("mock-batch-v1" if cfg.provider == "mock" else "gemini-3-pro-image"),
                 "remote_mismatch",
                 "外部処理の条件が一致しません。",
                 422,

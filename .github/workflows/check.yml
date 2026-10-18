@@ -10,13 +10,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.12'
-      - run: uv sync --locked
-      - run: uv run ruff check src tests scripts
-      - run: uv run ruff format --check src tests scripts
-      - run: uv run python -c "import tempfile; from pathlib import Path; from manga_drawing.config import Config; from manga_drawing.web import create_app; assert create_app(Config(Path(tempfile.mkdtemp()))).openapi()['paths']"
-      - run: uv run playwright install --with-deps chromium
-      - run: MANGA_BROWSER_TESTS=1 uv run pytest -q
-      - run: uv run python scripts/benchmark.py
+      - run: uv sync --locked --extra gemini
+      - run: uv run --extra gemini ruff check src tests scripts
+      - run: uv run --extra gemini ruff format --check src tests scripts
+      - run: uv run --extra gemini python -c "import tempfile; from pathlib import Path; from manga_drawing.config import Config; from manga_drawing.web import create_app; assert create_app(Config(Path(tempfile.mkdtemp()))).openapi()['paths']"
+      - run: uv run --extra gemini playwright install --with-deps chromium
+      - run: MANGA_BROWSER_TESTS=1 uv run --extra gemini pytest -q
+      - run: uv run --extra gemini python scripts/benchmark.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

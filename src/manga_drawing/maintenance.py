@@ -36,7 +36,11 @@ def doctor(cfg):
             f.flush()
     except OSError:
         report["issues"].append("data_dir_not_writable")
-    if cfg.provider != "mock":
+    try:
+        from .prompts import provider_ready
+
+        provider_ready(cfg, {})
+    except Exception:
         report["issues"].append("provider_not_configured")
     with connect(cfg) as db:
         report["database"] = db.execute("PRAGMA integrity_check").fetchone()[0]

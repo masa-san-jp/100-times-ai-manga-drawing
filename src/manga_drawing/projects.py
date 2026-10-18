@@ -203,7 +203,7 @@ def page_detail(db, page_id):
     page["candidates"] = [
         dict(r)
         for r in db.execute(
-            """SELECT c.*,r.id round_id,r.sequence,j.candidate_index
+            """SELECT c.*,r.id round_id,r.sequence,j.candidate_index,json_extract(r.snapshot_json,'$.settings.provider') provider
                         FROM candidates c JOIN jobs j ON j.id=c.job_id JOIN rounds r ON r.id=j.round_id
                         WHERE r.page_id=? ORDER BY r.sequence DESC,j.candidate_index LIMIT 100""",
             (page_id,),

@@ -7,7 +7,7 @@ from pathlib import Path
 import secrets
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _locks: dict[str, threading.RLock] = {}
 _guard = threading.Lock()
@@ -23,6 +23,10 @@ class Config:
     max_external: int = 8
     mock_delay: float = 2.0
     poll_interval: float = 1.0
+    enable_live: bool = False
+    gemini_api_key: str = field(default="", repr=False, compare=False)
+    live_request_limit: int = 0
+    live_unit_micro: int = 0
 
     @classmethod
     def from_env(cls):
@@ -30,6 +34,11 @@ class Config:
         return cls(
             Path(os.environ.get("MANGA_DATA_DIR", base / "manga-drawing")).expanduser().resolve(),
             provider=os.environ.get("MANGA_PROVIDER", "mock"),
+            enable_live=os.environ.get("MANGA_ENABLE_LIVE") == "1",
+            gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
+            live_request_limit=int(os.environ.get("MANGA_LIVE_MAX_REQUESTS", "0")),
+            live_unit_micro=int(os.environ.get("MANGA_LIVE_UNIT_RESERVE_MICRO_USD", "0")),
+            poll_interval=60.0 if os.environ.get("MANGA_PROVIDER") == "gemini" else 1.0,
         )
 
     def prepare(self):

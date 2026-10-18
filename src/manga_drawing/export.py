@@ -34,6 +34,9 @@ def schedule(cfg, pid, request):
                     "round_id": job["round_id"],
                     "asset_hash": c["asset_hash"],
                     "raw_asset_hash": c["raw_asset_hash"],
+                    "provider": json.loads(get(db, "rounds", job["round_id"])["snapshot_json"])["settings"][
+                        "provider"
+                    ],
                 }
             )
         require(
@@ -42,7 +45,7 @@ def schedule(cfg, pid, request):
         require(pages, "no_accepted", "採用済みページがありません。", 422)
         settings = json.loads(project["settings_json"])
         manifest = {
-            "provider": "mock",
+            "provider": cfg.provider,
             "project_id": pid,
             "title": project["title"],
             "pages": pages,
@@ -51,6 +54,8 @@ def schedule(cfg, pid, request):
             "height": settings.get("height", 1920),
             "conversion": "grayscale-contain-white-center-lanczos",
         }
+        provenance = {p["provider"] for p in pages}
+        manifest["provider"] = next(iter(provenance)) if len(provenance) == 1 else "mixed"
         ident = uid()
         db.execute(
             "INSERT INTO exports(id,project_id,manifest_json,state,created_at) VALUES(?,?,?,'queued',?)",
@@ -134,7 +139,7 @@ def backup(cfg, output):
         (output / "secret").chmod(0o600)
         atomic_write(
             output / "backup.json",
-            canonical({"schema": 1, "created_at": timestamp(), "provider": "mock"}).encode(),
+            canonical({"schema": 1, "created_at": timestamp(), "provider": cfg.provider}).encode(),
         )
     return str(output)
 
