@@ -2,6 +2,10 @@
 
 <img width="604" height="281" alt="スクリーンショット 2026-03-07 9 36 01" src="https://github.com/user-attachments/assets/8454abc8-dc4c-4476-9b1c-2c1e1606af51" />
 
+**[note版を読む：生成AIを使って「マンガを描く」を100倍高速化する](https://note.com/masa_san_jp/n/n21a5c02f496f)**
+
+制作の背景や具体的な制作プロセス、完成原稿と実際に使ったプロンプトを紹介しています。
+
 ## Theme
 
 - 生成AIを使って、「マンガを描く」を100倍高速化する
@@ -26,9 +30,8 @@
 - 冊子版「100 TIMES AI MANGA DRAWING」
   - 発行：2026年3月7日
   - 2026年3月7日（土）技研AIマーケット @技研ベース にて頒布
-- note版「100 TIMES AI MANGA DRAWING」
+- [note版「100 TIMES AI MANGA DRAWING」を読む](https://note.com/masa_san_jp/n/n21a5c02f496f)
   - 公開：2026年3月7日
-  - https://note.com/masa_san_jp/n/n21a5c02f496f
  
 ## Task
 
