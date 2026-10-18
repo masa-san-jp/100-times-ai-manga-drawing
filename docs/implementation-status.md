@@ -18,6 +18,6 @@
 | I12 出力と復元 | 完了 | export.py。採用snapshot、比率保持、ZIP、模擬外部状態を含むバックアップ |
 | I13 受入 | 完了 | 全40試験成功、900ジョブの性能測定、ローカル安全性試験 |
 | I14 引き渡し | 完了 | 独立実装レビュー2名PASS、受け入れ記録、起動と運用手順 |
-| I15 実API | 接続実装・offline検証済み／live未完 | SDK契約試験に加えて実接続を試行。モデル情報取得は成功、生成3要求はHTTP400で拒否。T14未完了。[検証記録](gemini-acceptance.md) |
+| I15 実API | 接続実装・offline検証済み／live未完 | SDK契約試験に加えて実接続を試行。モデル情報取得は成功、生成3要求はHTTP400で拒否。未受理予約を0へ回復、上限3を維持。T14未完了。[検証記録](gemini-acceptance.md) |
 
 [受け入れ結果](acceptance-report.md)、[実装レビュー](implementation-review.md)、[運用手順](operations.md)を参照する。

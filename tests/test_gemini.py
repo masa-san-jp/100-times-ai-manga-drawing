@@ -21,6 +21,7 @@ from manga_drawing.providers.base import RateLimited, SubmissionUnknown
 from manga_drawing.providers.gemini import GeminiProvider, MODEL, ProviderNotConfigured, ProviderRejected
 from manga_drawing.web import create_app, health
 from manga_drawing.worker import Worker
+from manga_drawing.reservations import reclaim_rejected, release_unaccepted
 from conftest import make_project, page_rows, start
 
 
@@ -340,6 +341,11 @@ def test_upload_failures_are_bounded_and_other_chunks_continue(live, tmp_path, c
     assert not fake.creates
     with connect(cfg) as db:
         assert {r[0] for r in db.execute("SELECT state FROM jobs")} == {"failed"}
+        assert (
+            int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+            == 0
+        )
+        assert db.execute("SELECT spent_reserved_micro FROM batches").fetchone()[0] == 0
 
 
 def test_limit_reduction_blocks_existing_unsubmitted_chunk(live, tmp_path, clock, monkeypatch):
@@ -396,3 +402,126 @@ def test_rejection_diagnosis_is_allowlisted(live, message, suffix):
         provider.submit("files/input", MODEL, "correlation")
     assert result.value.code == "gemini_rejected_400" + ("_" + suffix if suffix else "")
     assert "secret-token" not in str(result.value)
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404, 429])
+def test_known_non_acceptance_returns_count_and_budget_once(live, tmp_path, clock, code):
+    cfg, fake, _ = live
+    pid, _ = make_project(cfg, tmp_path, 2)
+    start(cfg, pid)
+
+    class Rejected(Exception):
+        pass
+
+    error = Rejected()
+    error.code = code
+    error.message = "Precondition check failed."
+    original = fake.batches.create
+
+    def fail(**kwargs):
+        raise error
+
+    fake.batches.create = fail
+    Worker(cfg, clock).tick()
+    with connect(cfg) as db:
+        assert (
+            int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+            == 0
+        )
+        assert db.execute("SELECT spent_reserved_micro FROM batches").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 2
+        assert (
+            db.execute("SELECT COUNT(*) FROM audit_events WHERE action='release_unaccepted'").fetchone()[0]
+            == 1
+        )
+    assert reclaim_rejected(cfg) == reclaim_rejected(cfg) == 0
+    assert cfg.live_request_limit == 3
+    if code != 429:
+        # Restore the external service and retry two pages under the original cap.
+        fake.batches.create = original
+        start(cfg, pid, kind="extra", page_ids=[p["id"] for p in page_rows(cfg, pid)])
+        clock.advance(6)
+        worker = Worker(cfg, clock)
+        worker.tick()
+        worker.tick()
+        with connect(cfg) as db:
+            assert db.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] == 2
+            assert (
+                int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+                == 2
+            )
+
+
+@pytest.mark.parametrize("code", [500, 503, None])
+def test_unknown_submission_never_returns_reservations(live, tmp_path, clock, code):
+    cfg, fake, _ = live
+    pid, _ = make_project(cfg, tmp_path, 2)
+    start(cfg, pid)
+
+    class Uncertain(Exception):
+        pass
+
+    error = Uncertain()
+    error.code = code
+
+    def fail(**kwargs):
+        raise error
+
+    fake.batches.create = fail
+    Worker(cfg, clock).tick()
+    assert reclaim_rejected(cfg) == 0
+    with connect(cfg) as db:
+        assert db.execute("SELECT state FROM chunks").fetchone()[0] == "unknown"
+        assert (
+            int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+            == 2
+        )
+        assert db.execute("SELECT spent_reserved_micro FROM batches").fetchone()[0] == 200000
+
+
+def test_legacy_rejection_recovery_is_atomic_and_keeps_history(live, tmp_path, clock):
+    cfg, _, _ = live
+    pid, _ = make_project(cfg, tmp_path, 2)
+    start(cfg, pid)
+    cid = Worker(cfg, clock).prepare()
+    # A pre-upgrade definitive rejection has reservations but no refund receipt.
+    with transaction(cfg) as db:
+        db.execute("UPDATE chunks SET state='failed',last_error='gemini_rejected_400' WHERE id=?", (cid,))
+        db.execute(
+            "UPDATE attempts SET state='terminal_failed',error_code='gemini_rejected_400' WHERE chunk_id=?",
+            (cid,),
+        )
+        db.execute("UPDATE jobs SET state='failed'")
+    with pytest.raises(RuntimeError):
+        with transaction(cfg) as db:
+            assert release_unaccepted(cfg, db, cid, "provider_rejected") == 2
+            raise RuntimeError("simulate interrupted recovery")
+    with connect(cfg) as db:
+        assert (
+            int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+            == 2
+        )
+    assert reclaim_rejected(cfg) == 2
+    assert reclaim_rejected(cfg) == 0
+    with connect(cfg) as db:
+        assert db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 2
+        assert {r[0] for r in db.execute("SELECT state FROM jobs")} == {"failed"}
+
+
+def test_accepted_batch_keeps_reservations_even_when_output_missing(live, tmp_path, clock):
+    cfg, fake, _ = live
+    pid, _ = make_project(cfg, tmp_path, 2)
+    start(cfg, pid)
+    worker = Worker(cfg, clock)
+    worker.tick()
+    for job, _ in fake.jobs.values():
+        job.state = "JOB_STATE_FAILED"
+        job.dest = None
+    worker.tick()
+    assert reclaim_rejected(cfg) == 0
+    with connect(cfg) as db:
+        assert db.execute("SELECT remote_name FROM chunks").fetchone()[0]
+        assert (
+            int(db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()[0])
+            == 2
+        )

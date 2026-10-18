@@ -34,3 +34,5 @@ SDKの自動再試行は無効。429は明示拒否として待機し、送信�
 送信は明示live設定・キー・累積要求上限・予算単位がすべて揃った場合のみ可能。[設定と制約](operations.md#gemini接続)を参照。外部処理間隔は最短5秒、pollは60秒。生成を伴うAPIはオフライン試験では一度も呼んでいない。
 
 公開仕様の参照先：[Batch API](https://ai.google.dev/gemini-api/docs/batch-api)、[画像生成](https://ai.google.dev/gemini-api/docs/image-generation)、[Python SDK](https://googleapis.github.io/python-genai/)。ライブ受け入れ時にアカウントの提供モデル・実schema・料金を確認する。
+
+未受理が確定したnative createの拒否と送信前の確定失敗は、Geminiの要求枠とバッチ予算予約を返却する。成否不明や受理後の失敗は保持する。返却は一度だけ監査記録付きで行い、送信履歴は削除しない。

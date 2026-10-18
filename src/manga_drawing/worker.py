@@ -17,6 +17,7 @@ from .planning import receipt, save_receipt
 from .providers.base import RateLimited, SubmissionUnknown
 from .providers.factory import create_provider
 from .providers.gemini import ProviderRejected
+from .reservations import reclaim_rejected, release_unaccepted
 
 
 def failpoint(name):
@@ -220,6 +221,7 @@ class Worker:
                         "UPDATE attempts SET state='retryable_failed',error_code='rate_limited' WHERE id=?",
                         (a["id"],),
                     )
+                release_unaccepted(self.cfg, db, cid, "rate_limited")
             return
         except ProviderRejected as exc:
             with transaction(self.cfg) as db:
@@ -233,6 +235,7 @@ class Worker:
                     (cid,),
                 )
                 db.execute("UPDATE batches SET paused=1 WHERE id=?", (chunk["batch_id"],))
+                release_unaccepted(self.cfg, db, cid, "provider_rejected")
             return
         except (SubmissionUnknown, OSError):
             self.unknown(cid, "submission_unknown")
@@ -262,6 +265,7 @@ class Worker:
                     "UPDATE jobs SET state='failed' WHERE active_attempt_id IN (SELECT id FROM attempts WHERE chunk_id=?)",
                     (cid,),
                 )
+                release_unaccepted(self.cfg, db, cid, "before_submit")
 
     def unknown(self, cid, reason):
         with transaction(self.cfg) as db:
@@ -513,6 +517,7 @@ class Worker:
         thread = threading.Thread(target=beat, daemon=True)
         thread.start()
         try:
+            reclaim_rejected(self.cfg)
             self.check_assets()
             while True:
                 self.tick()
