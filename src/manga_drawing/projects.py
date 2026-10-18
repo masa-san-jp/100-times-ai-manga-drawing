@@ -53,8 +53,9 @@ def validate_import(cfg, token, manifest, project_id=None):
     parsed = Manifest.model_validate(manifest)
     manifest = parsed.model_dump()
     for item, model in zip(manifest["pages"], parsed.pages):
-        if "prompt_override" not in model.model_fields_set:
-            item.pop("prompt_override", None)
+        for field in ("prompt_override", "base_prompt"):
+            if field not in model.model_fields_set:
+                item.pop(field, None)
     folder, meta = import_meta(cfg, token)
     characters = {x["key"] for x in manifest["characters"]}
     scenes = {x["key"] for x in manifest["scenes"]}
@@ -176,7 +177,8 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                 scene=page["scene"],
                 directions=page["directions"],
                 page_prompt=page_prompt,
-                prompt_override=(page["prompt_override"] if "prompt_override" in page else json.loads(existing[0]).get("prompt_override") if existing else None),
+                base_prompt=(page["base_prompt"] if "base_prompt" in page else json.loads(existing[0]).get("base_prompt") if existing else None),
+                prompt_override=(page["prompt_override"] if "prompt_override" in page else None if page.get("base_prompt") is not None else json.loads(existing[0]).get("prompt_override") if existing else None),
             )
             db.execute(
                 """INSERT INTO pages(id,project_id,number,draft_json) VALUES(?,?,?,?)
@@ -301,6 +303,9 @@ def generation_progress(db, page):
 def page_detail(db, page_id):
     page = get(db, "pages", page_id)
     page["draft"] = json.loads(page.pop("draft_json"))
+    from .prompts import RULES
+
+    page["base_prompt"] = page["draft"].get("prompt_override") or page["draft"].get("base_prompt") or RULES
     page["latest_round"] = get(db, "rounds", page["latest_round_id"]) if page["latest_round_id"] else None
     if page["latest_round"]:
         page["latest_round"]["snapshot"] = json.loads(page["latest_round"].pop("snapshot_json"))

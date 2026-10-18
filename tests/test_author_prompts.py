@@ -3,6 +3,8 @@
 from dataclasses import replace
 import hashlib
 import json
+
+import pytest
 from pathlib import Path
 
 from manga_drawing import projects
@@ -24,13 +26,16 @@ def test_author_originals_are_anchored():
     assert hashlib.sha256(REFERENCE_RULES.encode()).hexdigest() == "fb0eb02b50b7c7af944c9aef9998f634f622aba2790dc8bf3f815152f942898a"
 
 
-def test_all_author_page_prompts_survive_import_and_wire(cfg, tmp_path):
+@pytest.mark.parametrize("field", ["prompt_override", "base_prompt"])
+def test_all_author_page_prompts_survive_import_and_wire(cfg, tmp_path, field):
     source = json.loads(SOURCE.read_text())
     originals = {p["page"]: p["text"] for p in source["pages"]}
     folder = tmp_path / "author-input"
     manifest = example(folder, 8)
     for page in manifest["pages"]:
-        page["prompt_override"] = originals.get(page["number"], RULES)
+        page[field] = originals.get(page["number"], RULES)
+        if field == "base_prompt":
+            page["directions"] = []
     token = projects.create_import(cfg)
     for path in folder.glob("*.png"):
         projects.upload(cfg, token, path.name, path.read_bytes())
@@ -77,3 +82,33 @@ def test_reimport_preserves_original_unless_explicitly_cleared(cfg, tmp_path):
     with connect(cfg) as db:
         draft = json.loads(db.execute("SELECT draft_json FROM pages WHERE project_id=?", (pid,)).fetchone()[0])
         assert draft["prompt_override"] is None
+
+
+def test_explicit_base_import_replaces_legacy_override(cfg, tmp_path):
+    folder = tmp_path / "base-migration"
+    manifest = example(folder, 1)
+    manifest["pages"][0]["prompt_override"] = "OLD"
+
+    def commit(pid=None):
+        token = projects.create_import(cfg)
+        for path in folder.glob("*.png"):
+            projects.upload(cfg, token, path.name, path.read_bytes())
+        report = projects.validate_import(cfg, token, manifest, project_id=pid)
+        assert not report["errors"]
+        return projects.commit_import(cfg, token, expected_version=report["expected_version"])["project_id"]
+
+    pid = commit()
+    manifest["pages"][0].pop("prompt_override")
+    manifest["pages"][0]["base_prompt"] = "NEW"
+    commit(pid)
+    seed_character_references(cfg, pid)
+    with connect(cfg) as db:
+        row = dict(db.execute("SELECT * FROM pages WHERE project_id=?", (pid,)).fetchone())
+        draft = json.loads(row["draft_json"])
+        assert draft["prompt_override"] is None
+        assert draft["base_prompt"] == "NEW"
+        assert snapshot(cfg, db, row)[0]["prompt"].startswith("NEW\n\n")
+        projects.patch_draft(db, row, {"base_prompt": draft["base_prompt"], "prompt_override": None, "page_prompt": "USER NOTE"})
+        row = dict(db.execute("SELECT * FROM pages WHERE project_id=?", (pid,)).fetchone())
+        sent = snapshot(cfg, db, row)[0]["prompt"]
+        assert sent.startswith("NEW\n\n") and "USER NOTE" in sent and "OLD" not in sent

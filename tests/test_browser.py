@@ -698,9 +698,10 @@ def test_accepted_preview_distinguishes_new_take(browser_app, cfg, tmp_path, clo
     expect(page.locator(".review-status")).to_have_text("採用済み")
 
 
-def test_author_full_prompt_edit_is_visible_and_inactive_inputs_disabled(browser_app, cfg, tmp_path):
+def test_author_original_is_read_only_and_page_notes_are_sent(browser_app, cfg, tmp_path):
     from manga_drawing import projects
     from manga_drawing.db import transaction
+    from manga_drawing.prompts import snapshot
 
     page, _, base = browser_app
     pid, _ = make_project(cfg, tmp_path, 1)
@@ -708,8 +709,17 @@ def test_author_full_prompt_edit_is_visible_and_inactive_inputs_disabled(browser
     with transaction(cfg) as db:
         projects.patch_draft(db, item, {"prompt_override": "AUTHOR ORIGINAL"})
     page.goto(f"{base}/pages/{item['id']}")
-    expect(page.locator("#prompt-override")).to_be_visible()
-    expect(page.locator("#prompt-override")).to_have_value("AUTHOR ORIGINAL")
+    expect(page.locator("#base-prompt")).to_have_text("AUTHOR ORIGINAL")
+    expect(page.locator("#prompt-override")).to_have_count(0)
     for field in ["page-prompt", "correction", "directions"]:
-        expect(page.locator(f"#{field}")).to_be_disabled()
-    expect(page.locator("#prompt-mode-warning")).to_contain_text("送信プロンプト全文")
+        expect(page.locator(f"#{field}")).to_be_enabled()
+    page.locator("#page-prompt").fill("① カメラを見上げる")
+    page.locator("#correction").fill("集中線を追加しない")
+    page.locator("#save-draft").click()
+    expect(page.locator("#instruction-save-state")).to_have_text("保存済み")
+    with connect(cfg) as db:
+        row = dict(db.execute("SELECT * FROM pages WHERE id=?", (item["id"],)).fetchone())
+        saved, _, _ = snapshot(cfg, db, row)
+        assert saved["prompt"].startswith("AUTHOR ORIGINAL\n\n")
+        assert "① カメラを見上げる" in saved["prompt"]
+        assert "集中線を追加しない" in saved["prompt"]

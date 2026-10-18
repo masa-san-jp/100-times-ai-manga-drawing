@@ -32,10 +32,13 @@ class PageInput(Strict):
     scene: str | None = None
     page_prompt: str | None = Field(default=None, max_length=20000)
     prompt_override: str | None = Field(default=None, min_length=1, max_length=20000)
+    base_prompt: str | None = Field(default=None, min_length=1, max_length=20000)
     directions: list[Direction] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique(self):
+        if self.base_prompt is not None and self.prompt_override is not None:
+            raise ValueError("base_promptとprompt_overrideは同時に指定できません")
         if len({x.marker for x in self.directions}) != len(self.directions):
             raise ValueError("演出番号が重複しています")
         if len(set(self.characters)) != len(self.characters):
@@ -69,6 +72,7 @@ class Draft(Strict):
     directions: list[Direction] = Field(default_factory=list)
     correction: str = Field(default="", max_length=20000)
     prompt_override: str | None = Field(default=None, max_length=20000)
+    base_prompt: str | None = Field(default=None, min_length=1, max_length=20000)
 
     @model_validator(mode="after")
     def unique(self):

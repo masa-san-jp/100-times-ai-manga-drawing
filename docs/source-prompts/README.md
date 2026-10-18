@@ -24,4 +24,4 @@
 | 通常のキャラクター生成 | 記事の英語のキャラクターデザインシート生成指示 |
 | Notion版2種類 | 資料保存のみ。上記の本文と混在させない |
 
-実装用の[漫画本文](../../src/manga_drawing/prompt_templates/comic-original.txt)・[キャラクター本文](../../src/manga_drawing/prompt_templates/character-original.txt)は原文との一致をテストします。作例のmanifestのprompt_overrideはそのままAPIのuser本文へ送信し、追加のシステム指示を重ねません。過去のテイクへ原文を差し込んで履歴を書き換えることもしません。
+実装用の[漫画本文](../../src/manga_drawing/prompt_templates/comic-original.txt)・[キャラクター本文](../../src/manga_drawing/prompt_templates/character-original.txt)は原文との一致をテストします。作例のmanifestのbase_promptは参照専用の原文として登録されます。ユーザーのページ指示・修正が空なら、そのままAPIのuser本文へ送信します。追記がある場合は原文を変更せず末尾に加え、追加のシステム指示を重ねません。過去のテイクへ原文を差し込んで履歴を書き換えることもしません。

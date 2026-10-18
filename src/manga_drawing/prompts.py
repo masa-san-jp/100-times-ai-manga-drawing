@@ -9,7 +9,7 @@ from .models import Draft
 from .projects import references
 from .providers.gemini import MODEL, SUPPORTED_MODELS
 
-TEMPLATE_VERSION = "author-original-v1"
+TEMPLATE_VERSION = "author-original-v2-page-notes"
 RULES = files("manga_drawing").joinpath("prompt_templates/comic-original.txt").read_text().rstrip("\n")
 SCENARIOS = {
     "success",
@@ -102,7 +102,7 @@ def snapshot(cfg, db, page, overrides=None):
     directions = "\n".join(
         f"{x['marker']} {x['text']}" for x in sorted(draft["directions"], key=lambda d: d["marker"])
     )
-    sections = [RULES]
+    sections = [draft["base_prompt"] if draft["base_prompt"] is not None else RULES]
     if draft["page_prompt"]:
         sections.append("このページの作画指示\n" + draft["page_prompt"])
     if directions:

@@ -61,7 +61,7 @@ def test_plan_cas_and_snapshot(cfg, tmp_path, clock):
         snap3, _, _ = snapshot(cfg, db, page)
         assert snap3["prompt"] == "EXACT OVERRIDE"
         assert "system_prompt" not in snap3 and "system_prompt" not in snap1
-        assert snap3["template_version"] == "author-original-v1"
+        assert snap3["template_version"] == "author-original-v2-page-notes"
         assert snap3["attachments"] == snap1["attachments"] == snap2["attachments"]
 
 
