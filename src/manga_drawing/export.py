@@ -258,7 +258,7 @@ def sync_rejected(cfg):
                     archive.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(old_file), str(archive))
             index = io.StringIO()
-            writer = csv.writer(index)
+            writer = csv.writer(index, lineterminator="\n")
             writer.writerow(["ページ", "テイク", "候補", "却下理由", "ファイル名"])
             for filename, row in expected.items():
                 writer.writerow(
@@ -297,7 +297,7 @@ def publish_flat(cfg, row, canonical_folder):
         shutil.rmtree(temp)
     temp.mkdir(parents=True)
     index = io.StringIO()
-    writer = csv.writer(index)
+    writer = csv.writer(index, lineterminator="\n")
     writer.writerow(["ページ", "テイク", "候補", "ファイル名"])
     for page in manifest["pages"]:
         filename = candidate_filename(page["number"], page.get("take", 1), page.get("candidate_index", 1))
