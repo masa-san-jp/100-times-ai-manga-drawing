@@ -240,13 +240,13 @@ async function pagesScreen() {
 
 async function detailScreen() {
   let page=null, dirty=false, editVersion=null, currentCandidate=null, userSelectedCandidate=false, autoLatestId=null, historyBefore=2147483647;
-  const historyCandidates=new Map(), historyRounds=new Map();
+  const historyCandidates=new Map();
   function markDirty(){$('instruction-save-state').textContent='未保存の作画指示・修正があります';if(!dirty)editVersion=page?.version;dirty=true;$('dirty').textContent='未保存の変更があります';}
-  for(const id of ['page-prompt','correction','directions'])$(id).addEventListener('input',markDirty);
+  for(const id of ['page-prompt','correction'])$(id).addEventListener('input',markDirty);
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   function candidate(){return [...page.candidates,...historyCandidates.values()].find(c=>c.id===$('candidate-select').value);}
   function cannotAccept(){const c=candidate();return !c||c.availability!=='available'||c.id===page.accepted_candidate_id||(c.round_id!==page.latest_round_id&&!$('restore-old').checked);}
-  function showCandidate(){const c=candidate();const round=c?(historyRounds.get(c.round_id)||(page.latest_round?.id===c.round_id?page.latest_round:null)):null;$('saved-round').textContent=round?`保存済みテイク${round.sequence}\n却下理由: ${round.rejection_reason||'なし'}\n\n${round.snapshot?.system_prompt?'共通のシステム指示\n'+round.snapshot.system_prompt+'\n\nページ指示\n':''}${round.prompt_text}`:'過去の版を追加表示すると、対応する送信全文を確認できます。';currentCandidate=c?.id||null;$('candidate-empty').textContent=page.generation_label+'。今回の候補画像はまだ表示できません。';$('candidate-context').textContent=c?`表示中：テイク${c.sequence||'?'}の生成結果${c.round_id!==page.latest_round_id?`（過去の版。今回のテイク${page.generation_sequence}ではありません）`:'（今回の版）'}`:'';$('candidate-empty').hidden=!!c;$('candidate-image').hidden=!c;if(c){$('candidate-image').src=`/api/assets/${c.asset_hash}`;$('candidate-image').alt=c.provider==='gemini'?'Geminiの候補画像':'模擬APIの候補画像';}const isOld=!!c&&c.round_id!==page.latest_round_id;
+  function showCandidate(){const c=candidate();currentCandidate=c?.id||null;$('candidate-empty').textContent=page.generation_label+'。今回の候補画像はまだ表示できません。';$('candidate-context').textContent=c?`表示中：テイク${c.sequence||'?'}の生成結果${c.round_id!==page.latest_round_id?`（過去の版。今回のテイク${page.generation_sequence}ではありません）`:'（今回の版）'}`:'';$('candidate-empty').hidden=!!c;$('candidate-image').hidden=!c;if(c){$('candidate-image').src=`/api/assets/${c.asset_hash}`;$('candidate-image').alt=c.provider==='gemini'?'Geminiの候補画像':'模擬APIの候補画像';}const isOld=!!c&&c.round_id!==page.latest_round_id;
     $('restore-old-label').hidden=!isOld;
     if(!isOld)$('restore-old').checked=false;
     const alreadyAccepted=!!c&&c.id===page.accepted_candidate_id;
@@ -254,7 +254,7 @@ async function detailScreen() {
     $('accept').disabled=cannotAccept();
     $('accept-help').textContent=alreadyAccepted?'':!c?'今回の候補画像が届くと採用できます。':isOld?'表示中は過去の版です。採用する場合は上の確認欄にチェックしてください。':'';
   }
-  function patch(){return {page_prompt:$('page-prompt').value,correction:$('correction').value,directions:JSON.parse($('directions').value),base_prompt:page.draft.prompt_override??page.draft.base_prompt??null,prompt_override:null};}
+  function patch(){return {page_prompt:$('page-prompt').value,correction:$('correction').value,base_prompt:page.draft.prompt_override??page.draft.base_prompt??null,prompt_override:null};}
   async function refresh() {
     const fetched=await api(`/api/pages/${state.page}`);
     if(page&&fetched.version<page.version)return;
@@ -272,14 +272,14 @@ async function detailScreen() {
     else if(page.accepted_candidate_id&&unique.has(page.accepted_candidate_id))select.value=page.accepted_candidate_id;
     showCandidate();
     const conflict=dirty&&editVersion!==page.version;$('edit-conflict').hidden=!conflict;if(conflict){$('dirty').textContent='別の画面で更新されています。編集内容を残して競合を確認してください。';$('conflict-saved').textContent=JSON.stringify(page.draft,null,2);}
-    if(!dirty){$('instruction-save-state').textContent='保存済み';editVersion=page.version;$('page-prompt').value=page.draft.page_prompt||'';$('correction').value=page.draft.correction;$('directions').value=JSON.stringify(page.draft.directions,null,2);}
-    $('base-prompt').textContent=page.base_prompt;
+    if(!dirty){$('instruction-save-state').textContent='保存済み';editVersion=page.version;$('page-prompt').value=page.draft.page_prompt||'';$('correction').value=page.draft.correction;}
+    if(historyBefore===2147483647)$('history-more').hidden=page.candidates.length<100;
     $('job-details').replaceChildren();
     for(const job of page.jobs){if(job.state==='failed'){const b=node('button',`候補${job.candidate_index}の生成を再試行`,'secondary');b.addEventListener('click',()=>operation('retry:'+job.id,async()=>({url:`/api/jobs/${job.id}/retry`,body:{expected_state:'failed',explicit_extra_attempt:true}})).then(refresh).catch(e=>notice(e.message)));$('job-details').append(b);}}
     await checkHealth();
   }
   async function save(){page=await api(`/api/pages/${state.page}/draft`,'PATCH',{expected_version:editVersion,patch:patch()});dirty=false;$('dirty').textContent='保存済み';await refresh();}
-  async function decide(decision){const c=candidate();page=await api(`/api/pages/${state.page}/review`,'POST',{expected_version:page.version,latest_round_id:page.latest_round_id,decision,candidate_id:decision==='accept'?c?.id:null,reason:$('reason').value,restore:$('restore-old').checked,clear_accepted:$('clear-accepted').checked});await refresh();}
+  async function decide(decision){const c=candidate();page=await api(`/api/pages/${state.page}/review`,'POST',{expected_version:page.version,latest_round_id:page.latest_round_id,decision,candidate_id:decision==='accept'?c?.id:null,reason:decision==='reject'?$('correction').value:'',restore:$('restore-old').checked,clear_accepted:$('clear-accepted').checked});await refresh();}
   action('rebase-edit',()=>{editVersion=page.version;$('edit-conflict').hidden=true;$('dirty').textContent='未保存の変更があります（最新内容を確認済み）';});
   for(const link of document.querySelectorAll('[data-page-switch]'))link.addEventListener('click',async event=>{
     if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||!dirty)return;
@@ -290,10 +290,8 @@ async function detailScreen() {
   action('save-draft',save);
   action('accept',()=>decide('accept'),cannotAccept);
   action('reject-save',async()=>{if(dirty)await save();await decide('reject');});
-  action('revise',async()=>{const result=await operation('revise:'+state.page,async()=>({url:`/api/pages/${state.page}/revise-and-generate`,body:{expected_version:editVersion,latest_round_id:page.latest_round_id,draft_patch:patch(),reason:$('reason').value,clear_accepted:$('clear-accepted').checked}}));const unchanged=JSON.stringify(patch())===JSON.stringify(result._sentBody.draft_patch);if(unchanged){dirty=false;$('dirty').textContent='保存済み';}else{dirty=true;notice('前回の再生成結果を確認しました。新しい編集内容は未保存のまま保持しています。');}await refresh();});
-  action('preview-prompt',async()=>{const p=await api(`/api/pages/${state.page}/prompt`);$('prompt-preview').textContent=p.prompt;$('system-prompt').textContent=p.system_prompt?'保存されたシステム指示\n'+p.system_prompt:'';$('attachments').textContent='添付: '+p.attachments.map(a=>a.role+(a.key?' '+a.key:'')).join('、');});
-  action('copy-reason',()=>{$('correction').value+='\n'+$('reason').value;markDirty();});
-  action('history-more',async()=>{const rows=await api(`/api/pages/${state.page}/history?before=${historyBefore}`);for(const r of rows){historyRounds.set(r.id,r);for(const c of r.candidates)historyCandidates.set(c.id,{...c,round_id:r.id,sequence:r.sequence});}if(rows.length)historyBefore=rows.at(-1).sequence;else $('history-more').hidden=true;await refresh();});
+  action('revise',async()=>{const result=await operation('revise:'+state.page,async()=>({url:`/api/pages/${state.page}/revise-and-generate`,body:{expected_version:editVersion,latest_round_id:page.latest_round_id,draft_patch:patch(),reason:$('correction').value,clear_accepted:$('clear-accepted').checked}}));const unchanged=JSON.stringify(patch())===JSON.stringify(result._sentBody.draft_patch);if(unchanged){dirty=false;$('dirty').textContent='保存済み';}else{dirty=true;notice('前回の再生成結果を確認しました。新しい編集内容は未保存のまま保持しています。');}await refresh();});
+  action('history-more',async()=>{const rows=await api(`/api/pages/${state.page}/history?before=${historyBefore}`);for(const r of rows){for(const c of r.candidates)historyCandidates.set(c.id,{...c,round_id:r.id,sequence:r.sequence});}if(rows.length)historyBefore=rows.at(-1).sequence;else $('history-more').hidden=true;await refresh();});
   $('candidate-select').addEventListener('change',()=>{userSelectedCandidate=true;$('restore-old').checked=false;showCandidate();});
   $('restore-old').addEventListener('change',showCandidate);
   $('source-select').addEventListener('change',()=>{$('source-image').src=`/api/assets/${$('source-select').value==='name'?page.draft.name_hash:page.draft.instruction_hash}`;$('source-image').alt=$('source-select').value==='name'?'入力のネーム画像':'入力の指示書画像';});

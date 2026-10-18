@@ -709,9 +709,12 @@ def test_author_original_is_read_only_and_page_notes_are_sent(browser_app, cfg, 
     with transaction(cfg) as db:
         projects.patch_draft(db, item, {"prompt_override": "AUTHOR ORIGINAL"})
     page.goto(f"{base}/pages/{item['id']}")
-    expect(page.locator("#base-prompt")).to_have_text("AUTHOR ORIGINAL")
+    expect(page.locator("#base-prompt")).to_have_count(0)
+    expect(page.locator("#prompt-editor-details")).to_have_count(0)
+    expect(page.locator("#directions")).to_have_count(0)
+    expect(page.locator("#reason")).to_have_count(0)
     expect(page.locator("#prompt-override")).to_have_count(0)
-    for field in ["page-prompt", "correction", "directions"]:
+    for field in ["page-prompt", "correction"]:
         expect(page.locator(f"#{field}")).to_be_enabled()
     page.locator("#page-prompt").fill("① カメラを見上げる")
     page.locator("#correction").fill("集中線を追加しない")

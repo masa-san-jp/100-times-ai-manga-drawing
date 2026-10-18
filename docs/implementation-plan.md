@@ -91,7 +91,7 @@ I02でローカルのプロバイダー契約と模擬APIを先に確定する�
 
 ## I04 作品と資料の一括登録
 
-**依存**：I03。**対応仕様**：4、10。**対象**：projects、assets、imports API、examples/minimal。
+**依存**：I03。**対応仕様**：4、10。**対象**：projects、assets、imports API、テスト用の一時入力。
 
 **実装**：manifestのschema、staging token、複数画像のstream保存、検証プレビュー、原子的なcommitを実装する。人物、シーン、ページ番号の対応と同番号更新のversionを検証する。登録後の共通設定・資料・page draft編集のサービスも実装する。自作の原稿と資料で動く小さなサンプルを用意する。
 

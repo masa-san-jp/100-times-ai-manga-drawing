@@ -7,7 +7,7 @@
 | I01 起動基盤 | 完了 | pyproject.toml、uv.lock、cli.py、CI。init/web/worker/doctor/backup/restore/example |
 | I02 模擬API | 完了 | providers/mock.py。永続外部ID、試験PNG、遅延と障害scenario、Gemini無効化 |
 | I03 保存 | 完了 | migrations、db.py、assets.py。hash保存、原子的ファイル更新、FKとCAS |
-| I04 登録 | 完了 | projects.py、imports API、examples/minimal。検証、一括登録、再登録、冪等receipt |
+| I04 登録 | 完了 | projects.py、imports API、テスト用の一時入力。検証、一括登録、再登録、冪等receipt |
 | I05 プロンプト | 完了 | prompts.py。固定テンプレート、入力版、全文編集、hash検証 |
 | I06 計画と枠 | 完了 | planning.py。固定計画、期限、冪等キー、送信枠、再試行 |
 | I07 バッチ | 完了 | worker.py。チャンク、同時外部枠、独立起動、pause、heartbeat |
@@ -120,3 +120,10 @@ Googleドキュメントのプロンプト1〜6とキャラクター生成指示
 原文は参照専用とし、利用者が編集する作画指示・修正内容を分離しました。base_promptの原文へ利用者の追記だけを加えます。旧overrideは画面で保存した際に原文へ無改変で移し、旧APIは互換維持。明示base登録時には古いoverrideを解除し、新原文が無視されないよう回帰検証しています。生成済み画像や採否は変更していません。
 
 検証：Chromiumを含む164テストとruffが成功。AI内部レビュー2件は再登録の移行指摘を修正後PASS。
+
+
+## 詳細画面の整理と不要作例の削除
+
+「演出・プロンプト・過去の候補」の詳細セクションを削除し、原文・JSON・送信全文・別の却下理由の表示を撤去しました。作画指示・修正内容・採否操作を残し、過去画像は候補選択から確認できます。既存の演出データは保存時に保持します。失敗時の再試行は生成状態の下に表示します。Chromium21件と関連38件の独立検証が成功しました。
+
+ユーザーの指定により公開作例のexamples/minimalを削除し、現行の参照も除去。合成入力は開発コマンドやテストの一時フォルダーで作り、公開作例として残しません。
