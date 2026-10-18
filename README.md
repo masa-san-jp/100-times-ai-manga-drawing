@@ -33,6 +33,16 @@
 - [note版「100 TIMES AI MANGA DRAWING」を読む](https://note.com/masa_san_jp/n/n21a5c02f496f)
   - 公開：2026年3月7日
  
+## 仕様と実装計画
+
+ソフトウェア化の計画は以下を参照してください。現時点では設計文書であり、アプリケーションは未実装です。
+
+- [実装担当者への引き継ぎ](docs/implementation-handoff.md)
+- [仕様設計の骨子](docs/software-design.md)
+- [実装仕様](docs/implementation-spec.md)
+- [Issue駆動の実装計画](docs/implementation-plan.md)
+- [独立レビュー記録](docs/design-review.md)
+
 ## 用語としての用例
 
 「100 TIMES AI MANGA DRAWING の工程整理を使い、ネームと作画指示を分けて下描きを試す」のように、マンガ制作へ生成AIを組み込むワークフローを指します。「100倍」は本企画のテーマであり、すべての工程・環境に対する性能保証ではありません。
