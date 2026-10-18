@@ -260,7 +260,7 @@ def test_export_opens_normal_image_folder_after_reload(browser_app, cfg, tmp_pat
     button.click()
     expect(page.locator("#notice")).to_have_text("画像フォルダーを開きました。")
     assert Path(opened[0][-1]).is_dir()
-    assert [p.name for p in Path(opened[0][-1]).iterdir()] == ["0001.png"]
+    assert [p.name for p in Path(opened[0][-1]).glob("*.png")] == ["0001_テイク01.png"]
     page.reload()
     expect(button).to_be_visible()
 
@@ -494,3 +494,44 @@ def test_page_prompt_can_be_saved_before_initial_generation(browser_app, cfg, tm
             db.execute("SELECT draft_json FROM pages WHERE id=?", (items[0]["id"],)).fetchone()[0]
         )
         assert saved["page_prompt"] == "① Harunaの正面。"
+
+
+def test_new_user_gets_work_folder_and_outputs_without_settings(
+    browser_app, cfg, tmp_path, clock, monkeypatch
+):
+    from manga_drawing import export as outputs
+
+    page, _, base = browser_app
+    source = tmp_path / "持ち込み原稿"
+    example(source, 1)
+    page.goto(base)
+    page.locator("#folder").set_input_files(str(source))
+    expect(page.locator("#commit-import")).to_be_visible()
+    page.locator("#commit-import").click()
+    page.wait_for_url("**/projects/*")
+    expect(page.locator("#open-work-folder")).to_be_visible()
+    with connect(cfg) as db:
+        pid = db.execute("SELECT id FROM projects").fetchone()[0]
+        work = Path(db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{pid}",)).fetchone()[0])
+    assert work.parent == cfg.root / "作品"
+    opened = []
+    monkeypatch.setattr(outputs.subprocess, "run", lambda args, **kwargs: opened.append(args))
+    page.locator("#open-work-folder").click()
+    expect(page.locator("#open-work-folder")).to_be_enabled()
+    assert opened[0][-1] == str(work)
+    page.locator("#generate").click()
+    expect(page.locator("#plan-summary")).to_contain_text("生成依頼を受付済み")
+    run(cfg, clock)
+    page.reload()
+    page.locator(".card-accept").click()
+    expect(page.locator(".review-status")).to_have_text("採用済み")
+    page.locator("#export-all").click()
+    expect(page.locator("#export-status")).to_have_text("書き出し中…")
+    outputs.process_export(cfg)
+    expect(page.locator("#export-status")).to_contain_text(str(work / "生成結果"))
+    assert (work / "生成結果" / "0001_テイク01.png").is_file()
+    page.locator(".card-reject").click()
+    expect(page.locator(".review-status")).to_have_text("要修正")
+    run(cfg, clock)
+    assert (work / "却下した候補" / "0001_テイク01.png").is_file()
+    assert (work / "却下した候補" / "候補一覧.csv").is_file()

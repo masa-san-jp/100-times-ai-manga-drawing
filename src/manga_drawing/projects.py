@@ -7,6 +7,7 @@ from . import assets
 from .common import DomainError, atomic_write, canonical, require, timestamp, uid
 from .db import connect, get, transaction
 from .models import Draft, Manifest
+from .workspaces import ensure_work_folder
 
 
 def create_import(cfg):
@@ -120,6 +121,7 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                 "DELETE FROM works WHERE id=? AND NOT EXISTS(SELECT 1 FROM projects WHERE work_id=?)",
                 (pid, pid),
             )
+        ensure_work_folder(cfg, db, get(db, "projects", pid)["work_id"])
         mapped, originals = {}, {}
         for path in meta["files"]:
             originals[path], mapped[path] = assets.normalized(cfg, db, (folder / "files" / path).read_bytes())

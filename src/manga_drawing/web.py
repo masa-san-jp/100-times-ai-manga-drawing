@@ -21,6 +21,7 @@ from .common import DomainError, canonical, require, timestamp, uid
 from .config import Config
 from .db import connect, get, initialize, transaction
 from .models import Character, Scene, Strict
+from .workspaces import ensure_work_folder
 
 
 class ImportValidation(Strict):
@@ -245,10 +246,25 @@ def create_app(cfg=None):
             context={"project": project, "projects": [], "works": works},
         )
 
+    @app.post("/api/projects/{pid}/folder/open")
+    def open_work_folder(pid: str):
+        with transaction(cfg) as db:
+            project = get(db, "projects", pid)
+            folder = ensure_work_folder(cfg, db, project["work_id"])
+        folder.mkdir(parents=True, exist_ok=True)
+        # Use the same fixed-argument OS launcher as exported image folders.
+        from .export import launch_folder
+
+        launch_folder(folder)
+        return {"data": {"folder_path": str(folder)}}
+
     @app.get("/projects/{pid}")
     def listing(request: Request, pid: str):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
+            project["work_folder"] = db.execute(
+                "SELECT value FROM system WHERE key=?", (f"work_folder:{project['work_id']}",)
+            ).fetchone()[0]
             latest_export = db.execute(
                 "SELECT id FROM exports WHERE project_id=? AND state='complete' "
                 "AND archive_path NOT LIKE '%.zip' ORDER BY created_at DESC LIMIT 1",
@@ -370,7 +386,7 @@ def create_app(cfg=None):
             require(project["version"] == body.expected_version)
             work_id = body.patch.get("work_id", project["work_id"])
             get(db, "works", work_id)
-            if "work_folder" in body.patch:
+            if "work_folder" in body.patch and work_id == project["work_id"]:
                 folder_value = body.patch["work_folder"]
                 require(
                     isinstance(folder_value, str),
@@ -387,12 +403,22 @@ def create_app(cfg=None):
                         "存在する作品フォルダーの絶対パスを指定してください。",
                         422,
                     )
+                    previous_folder = db.execute(
+                        "SELECT value FROM system WHERE key=?", (f"work_folder:{work_id}",)
+                    ).fetchone()
                     db.execute(
                         "INSERT OR REPLACE INTO system VALUES(?,?)",
                         (f"work_folder:{work_id}", str(folder.resolve())),
                     )
+                    if not previous_folder or previous_folder[0] != str(folder.resolve()):
+                        db.execute("DELETE FROM system WHERE key=?", (f"managed_work_folder:{work_id}",))
                 else:
-                    db.execute("DELETE FROM system WHERE key=?", (f"work_folder:{work_id}",))
+                    managed = db.execute(
+                        "SELECT value FROM system WHERE key=?", (f"managed_work_folder:{work_id}",)
+                    ).fetchone()
+                    if not managed:
+                        db.execute("DELETE FROM system WHERE key=?", (f"work_folder:{work_id}",))
+                    ensure_work_folder(cfg, db, work_id)
             lifecycle = body.patch.get("lifecycle", project["lifecycle"])
             require(
                 lifecycle in ("active", "completed", "archived"), "lifecycle", "制作状態が不正です。", 422
@@ -453,7 +479,9 @@ def create_app(cfg=None):
                 "UPDATE projects SET title=?,settings_json=?,version=version+1 WHERE id=?",
                 (title, canonical(settings), pid),
             )
-            return {"data": get(db, "projects", pid)}
+            saved = get(db, "projects", pid)
+            saved["work_folder"] = str(ensure_work_folder(cfg, db, work_id))
+            return {"data": saved}
 
     @app.patch("/api/references/{rid}")
     def patch_reference(rid: str, body: dict):

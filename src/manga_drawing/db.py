@@ -29,6 +29,10 @@ def initialize(cfg):
         if version < 2:
             script = files("manga_drawing").joinpath("migrations/002_works.sql").read_text()
             db.executescript("BEGIN IMMEDIATE;\n" + script + "\nPRAGMA user_version=2;COMMIT;")
+        from .workspaces import ensure_work_folder
+
+        for work in db.execute("SELECT id FROM works").fetchall():
+            ensure_work_folder(cfg, db, work["id"])
 
 
 @contextmanager

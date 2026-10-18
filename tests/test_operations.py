@@ -258,7 +258,8 @@ def test_folder_export_open_button_and_reloaded_history(cfg, client, tmp_path, c
     with connect(cfg) as db:
         row = get(db, "exports", eid)
     folder = outputs.output_folder(cfg, row)
-    assert "--" in str(folder.relative_to(cfg.root))
+    assert folder.parent.parent == cfg.root / "作品"
+    assert folder.name == "生成結果"
     assert result["folder_path"] == str(folder) and folder.is_dir()
     assert "download_url" not in result
     opened = []
@@ -379,7 +380,7 @@ def test_rejected_candidates_are_named_and_restored_without_loss(cfg, tmp_path, 
     work = tmp_path / "公開作品"
     work.mkdir()
     with connect(cfg) as db:
-        db.execute("INSERT INTO system VALUES(?,?)", (f"work_folder:{pid}", str(work)))
+        db.execute("INSERT OR REPLACE INTO system VALUES(?,?)", (f"work_folder:{pid}", str(work)))
     start(cfg, pid)
     run(cfg, clock)
     item = page_rows(cfg, pid)[0]
@@ -415,3 +416,47 @@ def test_rejected_candidates_are_named_and_restored_without_loss(cfg, tmp_path, 
     sync_rejected(cfg)
     assert not path.exists()
     assert (cfg.root / "exports" / "rejected-history" / pid / candidate["asset_hash"]).is_file()
+
+
+def test_managed_work_folder_restore_uses_new_machine_path(cfg, tmp_path, clock):
+    from manga_drawing import export as outputs
+
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    run(cfg, clock)
+    accept_first(cfg, pid)
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+        old_folder = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{pid}",)).fetchone()[0]
+    eid = schedule(cfg, pid, {"expected_version": version, "mode": "complete"})["export_id"]
+    process_export(cfg)
+    location = backup(cfg, tmp_path / "移行用バックアップ")
+    restored = Config(tmp_path / "別のマシン")
+    restore(restored, location)
+    initialize(restored)
+    with connect(restored) as db:
+        new_folder = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{pid}",)).fetchone()[0]
+        row = get(db, "exports", eid)
+    assert new_folder != old_folder
+    assert outputs.output_folder(restored, row) == restored.root / "作品" / "サンプル作品" / "生成結果"
+    assert (outputs.output_folder(restored, row) / "0001_テイク01.png").is_file()
+
+
+def test_saving_settings_keeps_managed_folder(cfg, client, tmp_path):
+    pid, _ = make_project(cfg, tmp_path, 1)
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+        folder = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{pid}",)).fetchone()[0]
+    saved = client.patch(
+        f"/api/projects/{pid}",
+        json={"expected_version": version, "patch": {"work_folder": folder, "title": "名前を変更"}},
+    )
+    assert saved.status_code == 200
+    with connect(cfg) as db:
+        assert db.execute("SELECT value FROM system WHERE key=?", (f"managed_work_folder:{pid}",)).fetchone()
+    reset = client.patch(
+        f"/api/projects/{pid}",
+        json={"expected_version": saved.json()["data"]["version"], "patch": {"work_folder": ""}},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["data"]["work_folder"] == folder

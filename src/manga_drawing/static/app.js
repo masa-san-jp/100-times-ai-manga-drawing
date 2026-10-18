@@ -72,7 +72,7 @@ async function settingsScreen() {
   action('commit-import',async()=>{const result=await api(`/api/imports/${importToken}/commit`,'POST',{expected_version:expectedVersion,work_id:$('import-work')?.value||null});location.href=`/projects/${result.project_id}`;});
   action('save-project',async()=>{
     const saved=await api(`/api/projects/${state.project}`,'PATCH',{expected_version:projectVersion,patch:{title:$('project-title').value,work_id:$('project-work').value,work_title:$('work-title').value,lifecycle:$('project-lifecycle').value,work_folder:$('work-folder').value,settings:{width:Number($('output-width').value),height:Number($('output-height').value),scenario:$('scenario').value}}});
-    projectVersion=saved.version;notice('作品設定を保存しました。');
+    projectVersion=saved.version;$('work-folder').value=saved.work_folder;notice('作品設定を保存しました。');
   });
   for(const button of document.querySelectorAll('.save-reference'))button.addEventListener('click',async()=>{
     const container=button.closest('.reference');button.disabled=true;
@@ -81,6 +81,7 @@ async function settingsScreen() {
 }
 
 async function pagesScreen() {
+  action('open-work-folder',async()=>{await api(`/api/projects/${state.project}/folder/open`,'POST');});
   const selected=new Set(), visiblePages=new Map(); let next=null, loaded=40, busy=false;
   function countSelection(){
     $('selection-count').textContent=selected.size?`生成対象：指定した${selected.size}ページ（採否判定とは別です）`:'生成対象：ボタンに該当する全ページ';

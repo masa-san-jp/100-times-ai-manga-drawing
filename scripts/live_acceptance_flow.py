@@ -86,7 +86,7 @@ def matching_manifest(db, pid, manifest):
         and {
             key: value
             for key, value in manifest.items()
-            if key not in {"work_id", "work_title", "output_relative", "publication_relative"}
+            if key not in {"work_id", "work_title", "output_relative", "publication_relative", "work_folder"}
         }
         == {
             "provider": "gemini",
@@ -103,9 +103,11 @@ def matching_manifest(db, pid, manifest):
 
 def verify_directory(cfg, output):
     manifest = json.loads(output["manifest_json"])
-    folder = output_folder(cfg, output)
+    from manga_drawing.export import export_target, public_manifest
+
+    folder = export_target(cfg, output) / "pages"
     require(
-        json.loads((folder.parent / "manifest.json").read_text()) == manifest,
+        json.loads((folder.parent / "manifest.json").read_text()) == public_manifest(manifest),
         "test_export",
         "出力のmanifestが一致しません。",
     )

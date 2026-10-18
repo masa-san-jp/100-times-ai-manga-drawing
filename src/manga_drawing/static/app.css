@@ -16,3 +16,5 @@
 .thumbnail>span{padding:16px;text-align:center;white-space:normal;overflow-wrap:anywhere;color:var(--text);font-size:14px}.generation-phase{font-size:13px;line-height:1.6;color:var(--muted);margin:8px 0 0;overflow-wrap:anywhere}#generation-phase{font-weight:600;background:var(--soft);padding:12px 16px}
 
 .card-caption .review-status{max-width:100%;overflow-wrap:anywhere}
+
+.work-location{margin:16px 0}.work-location p{overflow-wrap:anywhere;margin:8px 0}

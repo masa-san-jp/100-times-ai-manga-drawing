@@ -17,6 +17,7 @@ from PIL import Image
 from . import assets
 from .common import DomainError, atomic_write, canonical, require, timestamp, uid
 from .db import connect, get, transaction
+from .workspaces import ensure_work_folder
 
 
 def readable_name(title, ident):
@@ -110,6 +111,7 @@ def schedule(cfg, pid, request):
             / readable_name(project["title"], pid)
             / ident
         )
+        ensure_work_folder(cfg, db, work["id"])
         configured = db.execute(
             "SELECT value FROM system WHERE key=?", (f"work_folder:{work['id']}",)
         ).fetchone()
@@ -357,6 +359,10 @@ def output_folder(cfg, row):
 
 def open_folder(cfg, row):
     folder = output_folder(cfg, row)
+    return launch_folder(folder)
+
+
+def launch_folder(folder):
     try:
         if sys.platform == "win32":
             os.startfile(str(folder))
@@ -390,6 +396,7 @@ def backup(cfg, output):
                     src.backup(dst)
         for directory in (
             "assets",
+            "作品",
             "chunks",
             "exports",
             "staging",
@@ -429,3 +436,27 @@ def restore(cfg, source):
         422,
     )
     shutil.copytree(source, cfg.root, dirs_exist_ok=True)
+    with transaction(cfg) as db:
+        for row in db.execute(
+            "SELECT key,value FROM system WHERE key LIKE 'managed_work_folder:%'"
+        ).fetchall():
+            work_id = row["key"].split(":", 1)[1]
+            relative = Path(row["value"])
+            require(
+                not relative.is_absolute() and ".." not in relative.parts,
+                "restore_path",
+                "作品フォルダーの保存情報が不正です。",
+                422,
+            )
+            old = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{work_id}",)).fetchone()
+            target = str(cfg.root / relative)
+            db.execute("UPDATE system SET value=? WHERE key=?", (target, f"work_folder:{work_id}"))
+            if old:
+                for export in db.execute("SELECT id,manifest_json FROM exports").fetchall():
+                    manifest = json.loads(export["manifest_json"])
+                    if manifest.get("work_folder") == old[0]:
+                        manifest["work_folder"] = target
+                        db.execute(
+                            "UPDATE exports SET manifest_json=? WHERE id=?",
+                            (canonical(manifest), export["id"]),
+                        )
