@@ -60,6 +60,9 @@ def test_plan_cas_and_snapshot(cfg, tmp_path, clock):
         projects.patch_draft(db, page, {"prompt_override": "EXACT OVERRIDE"})
         snap3, _, _ = snapshot(cfg, db, page)
         assert snap3["prompt"] == "EXACT OVERRIDE"
+        from manga_drawing.prompts import RULES
+        assert snap3["system_prompt"] == snap1["system_prompt"] == RULES
+        assert snap3["template_version"] == "mono-v3-strict"
         assert snap3["attachments"] == snap1["attachments"] == snap2["attachments"]
 
 
@@ -364,3 +367,20 @@ def test_image_reimport_preserves_page_prompt_when_omitted(cfg, tmp_path):
     projects.commit_import(cfg, token, report["expected_version"])
     with connect(cfg) as db:
         assert projects.page_detail(db, item["id"])["draft"]["page_prompt"] == "① 保存した作画指示"
+
+
+def test_system_prompt_is_frozen_and_visible_in_history(cfg, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from manga_drawing import prompts
+    from manga_drawing.web import create_app
+
+    pid, _ = make_project(cfg, tmp_path, 1)
+    start(cfg, pid)
+    item = page_rows(cfg, pid)[0]
+    saved = prompts.RULES
+    monkeypatch.setattr(prompts, "RULES", "UPDATED COMMON RULES")
+    with TestClient(create_app(cfg), base_url="http://127.0.0.1") as client:
+        history = client.get(f"/api/pages/{item['id']}/history").json()["data"]
+        assert history[0]["snapshot"]["system_prompt"] == saved
+        preview = client.get(f"/api/pages/{item['id']}/prompt").json()["data"]
+        assert preview["system_prompt"] == "UPDATED COMMON RULES"

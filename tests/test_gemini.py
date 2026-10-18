@@ -158,6 +158,8 @@ def test_offline_sdk_protocol_and_full_pipeline(live, tmp_path, clock):
         assert provider.describe("batches/job-0")["model"] == MODEL
         request = json.loads(next(iter(fake.inputs.values())).splitlines()[0])
         assert "snapshot" not in request
+        from manga_drawing.prompts import RULES
+        assert request["request"]["systemInstruction"] == {"parts": [{"text": RULES}]}
         assert request["request"]["generation_config"]["maxOutputTokens"] == 32768
         assert request["request"]["generation_config"]["imageConfig"] == {
             "aspectRatio": "3:4",

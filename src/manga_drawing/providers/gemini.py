@@ -149,6 +149,8 @@ class GeminiProvider:
                             "imageConfig": {"aspectRatio": "3:4", "imageSize": "2K"},
                         },
                     }
+                    if snap.get("system_prompt"):
+                        request["systemInstruction"] = {"parts": [{"text": snap["system_prompt"]}]}
                     line = canonical({"key": item["key"], "request": request}) + "\n"
                     require(
                         len(line.encode()) <= 20 * 1024**2,
