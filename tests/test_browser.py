@@ -50,6 +50,9 @@ def test_browser_import_review_regenerate_and_themes(browser_app, cfg, tmp_path,
     page.on("pageerror", lambda e: errors.append(str(e)))
     folder = tmp_path / "sample"
     example(folder, 3)
+    (folder / "README.md").write_text("資料の説明")
+    (folder / ".DS_Store").write_bytes(b"finder metadata")
+    (folder / ".gitkeep").touch()
     page.goto(base)
     for mode in ("light", "dark"):
         page.locator("#theme").select_option(mode)

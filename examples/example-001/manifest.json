@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "title": "作例001",
+  "characters": [
+    {
+      "key": "Akihiko",
+      "name": "Akihiko",
+      "images": [
+        "キャラクタースケッチ/Akihiko.PNG"
+      ]
+    },
+    {
+      "key": "Chinatsu",
+      "name": "Chinatsu",
+      "images": [
+        "キャラクタースケッチ/Chinatsu.PNG"
+      ]
+    },
+    {
+      "key": "Haruna",
+      "name": "Haruna",
+      "images": [
+        "キャラクタースケッチ/Haruna.PNG"
+      ]
+    },
+    {
+      "key": "Tohma",
+      "name": "Tohma",
+      "images": [
+        "キャラクタースケッチ/Tohma.PNG"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "number": 1,
+      "name": "ネーム/01-name.png",
+      "instructions": "作画指示書/01-WI.png",
+      "characters": [
+        "Haruna"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "ネーム/02-name.png",
+      "instructions": "作画指示書/02-WI.png",
+      "characters": [
+        "Haruna",
+        "Chinatsu"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "ネーム/03-name.png",
+      "instructions": "作画指示書/03-WI.png",
+      "characters": [
+        "Haruna",
+        "Chinatsu",
+        "Akihiko"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "ネーム/04-name.png",
+      "instructions": "作画指示書/04-WI.png",
+      "characters": [
+        "Haruna",
+        "Tohma",
+        "Akihiko"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "ネーム/05-name.png",
+      "instructions": "作画指示書/05-WI.png",
+      "characters": [
+        "Haruna",
+        "Tohma",
+        "Akihiko",
+        "Chinatsu"
+      ]
+    },
+    {
+      "number": 6,
+      "name": "ネーム/06-name.png",
+      "instructions": "作画指示書/06-WI.png",
+      "characters": [
+        "Haruna",
+        "Chinatsu"
+      ]
+    },
+    {
+      "number": 7,
+      "name": "ネーム/07-name.png",
+      "instructions": "作画指示書/07-WI.png",
+      "characters": [
+        "Haruna"
+      ]
+    },
+    {
+      "number": 8,
+      "name": "ネーム/08-name.png",
+      "instructions": "作画指示書/08-WI.png",
+      "characters": [
+        "Haruna"
+      ]
+    }
+  ]
+}

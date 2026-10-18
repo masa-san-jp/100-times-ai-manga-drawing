@@ -45,7 +45,7 @@ async function settingsScreen() {
   let projectVersion=Number(document.body.dataset.projectVersion);
   async function importFiles(event) {
     notice(''); $('commit-import').hidden=true;
-    const files=Array.from(event.target.files);
+    const files=Array.from(event.target.files).filter(file=>file.name==='manifest.json'||/\.(png|jpe?g)$/i.test(file.name));
     const manifestFile=files.find(f=>f.name==='manifest.json');
     if(!manifestFile)throw new Error('manifest.jsonを含むフォルダーを選んでください。');
     const manifest=JSON.parse(await manifestFile.text());
