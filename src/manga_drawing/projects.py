@@ -80,11 +80,13 @@ def validate_import(cfg, token, manifest, project_id=None):
     return {"token": token, "errors": errors, "pages": len(manifest["pages"]), "expected_version": version}
 
 
-def commit_import(cfg, token, expected_version=None):
+def commit_import(cfg, token, expected_version=None, work_id=None):
     with transaction(cfg) as db:
         prior = db.execute("SELECT value FROM system WHERE key=?", (f"import:{token}",)).fetchone()
         if prior:
             return {"project_id": prior[0]}
+        if work_id:
+            get(db, "works", work_id)
         folder, meta = import_meta(cfg, token)
         try:
             plan = json.loads((folder / "plan.json").read_text())
@@ -112,9 +114,15 @@ def commit_import(cfg, token, expected_version=None):
                 "INSERT INTO projects(id,title,created_at) VALUES(?,?,?)",
                 (pid, manifest["title"], timestamp()),
             )
-        mapped = {}
+        if work_id and not plan["project_id"]:
+            db.execute("UPDATE projects SET work_id=? WHERE id=?", (work_id, pid))
+            db.execute(
+                "DELETE FROM works WHERE id=? AND NOT EXISTS(SELECT 1 FROM projects WHERE work_id=?)",
+                (pid, pid),
+            )
+        mapped, originals = {}, {}
         for path in meta["files"]:
-            _, mapped[path] = assets.normalized(cfg, db, (folder / "files" / path).read_bytes())
+            originals[path], mapped[path] = assets.normalized(cfg, db, (folder / "files" / path).read_bytes())
         for kind, group in (("character", manifest["characters"]), ("scene", manifest["scenes"])):
             for ref in group:
                 row = db.execute(
@@ -153,6 +161,18 @@ def commit_import(cfg, token, expected_version=None):
                 (uid(), pid, page["number"], draft.model_dump_json()),
             )
         db.execute("UPDATE projects SET title=?,version=version+1 WHERE id=?", (manifest["title"], pid))
+        db.execute(
+            "INSERT INTO input_imports VALUES(?,?,?,?,?)",
+            (
+                token,
+                pid,
+                canonical(manifest),
+                canonical(
+                    {path: {"original": originals[path], "normalized": mapped[path]} for path in mapped}
+                ),
+                timestamp(),
+            ),
+        )
         # Keep receipt in the DB transaction, not in staging, so rollback is atomic.
         db.execute("INSERT OR REPLACE INTO system VALUES(?,?)", (f"import:{token}", pid))
         return {"project_id": pid}

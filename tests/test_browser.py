@@ -264,3 +264,34 @@ def test_export_opens_normal_image_folder_after_reload(browser_app, cfg, tmp_pat
     assert [p.name for p in Path(opened[0][-1]).iterdir()] == ["0001.png"]
     page.reload()
     expect(button).to_be_visible()
+
+
+def test_library_episode_archive_reopen(browser_app, cfg, tmp_path):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 2)
+    page.goto(f"{base}/projects/{pid}/settings")
+    page.locator("#work-title").fill("連載テスト")
+    page.locator("#project-title").fill("第1話")
+    page.locator("#project-lifecycle").select_option("archived")
+    page.locator("#save-project").click()
+    expect(page.locator("#notice")).to_contain_text("保存しました")
+    page.goto(base)
+    expect(page.locator(".episode-item:visible")).to_have_count(0)
+    page.locator("#library-filter").select_option("archived")
+    expect(page.locator(".episode-item:visible")).to_contain_text("第1話")
+    expect(page.locator(".work-group:visible h3")).to_have_text("連載テスト")
+    page.locator(".episode-item:visible").click()
+    page.goto(f"{base}/projects/{pid}/settings")
+    page.locator("#project-lifecycle").select_option("active")
+    page.locator("#save-project").click()
+    expect(page.locator("#notice")).to_contain_text("保存しました")
+    page.goto(base)
+    expect(page.locator(".episode-item:visible")).to_have_count(1)
+    page.locator(".work-group:visible a.button").click()
+    expect(page.locator("#import-work")).to_have_value(pid)
+    for mode in ("light", "dark"):
+        page.locator("#theme").select_option(mode)
+        page.screenshot(path=f"artifacts/screenshots/library-{mode}-1280.png", full_page=True)
+        page.set_viewport_size({"width": 360, "height": 900})
+        assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+        page.set_viewport_size({"width": 1280, "height": 900})

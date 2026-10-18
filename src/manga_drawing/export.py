@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
@@ -13,6 +14,27 @@ from PIL import Image
 from . import assets
 from .common import DomainError, atomic_write, canonical, require, timestamp, uid
 from .db import connect, get, transaction
+
+
+def readable_name(title, ident):
+    name = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "_", title).strip(" .")[:60]
+    return f"{name or '名称未設定'}--{ident[:8]}"
+
+
+def export_relative(row):
+    manifest = json.loads(row["manifest_json"])
+    relative = manifest.get("output_relative", f"exports/{row['id']}")
+    path = Path(relative)
+    require(
+        not path.is_absolute()
+        and ".." not in path.parts
+        and path.parts[0] == "exports"
+        and path.name == row["id"],
+        "export_path",
+        "書き出し先が不正です。",
+        422,
+    )
+    return path
 
 
 def schedule(cfg, pid, request):
@@ -59,6 +81,15 @@ def schedule(cfg, pid, request):
         provenance = {p["provider"] for p in pages}
         manifest["provider"] = next(iter(provenance)) if len(provenance) == 1 else "mixed"
         ident = uid()
+        work = get(db, "works", project["work_id"])
+        manifest["work_id"] = work["id"]
+        manifest["work_title"] = work["title"]
+        manifest["output_relative"] = str(
+            Path("exports")
+            / readable_name(work["title"], work["id"])
+            / readable_name(project["title"], pid)
+            / ident
+        )
         db.execute(
             "INSERT INTO exports(id,project_id,manifest_json,state,created_at) VALUES(?,?,?,'queued',?)",
             (ident, pid, canonical(manifest), timestamp()),
@@ -75,7 +106,7 @@ def process_export(cfg):
             if not row:
                 return
             row = dict(row)
-        final = cfg.root / "exports" / row["id"]
+        final = cfg.root / export_relative(row)
         temp = final.with_name(final.name + ".tmp")
         try:
             with transaction(cfg) as db:
@@ -126,7 +157,7 @@ def process_export(cfg):
 def output_folder(cfg, row):
     require(row["state"] == "complete", "not_ready", "書き出しが完了していません。", 409)
     require(
-        row["archive_path"] == f"exports/{row['id']}",
+        row["archive_path"] == str(export_relative(row)),
         "legacy_export",
         "以前の圧縮形式です。画像をもう一度書き出してください。",
         409,

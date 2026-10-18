@@ -35,6 +35,12 @@ action('close-zoom',()=> $('zoom').close());
 async function checkHealth() { const h=await api('/api/health'); state.provider=h.provider; $('worker-status').textContent=(h.worker_running?'ワーカー稼働中':'ワーカー停止中 · manga workerで起動')+(h.provider==='gemini'?` / ${h.live_connection_verified?'API疎通確認済':'API疎通未検証'}・残り予約可能${h.live_remaining_requests}件${h.live_limit_wait?`（累積上限のため${h.live_queued_requests}件待機）`:h.live_remaining_requests===0?'（追加予約枠なし）':''}`:''); }
 
 async function settingsScreen() {
+  function filterLibrary() {
+    const value=$('library-filter')?.value||'all';
+    for(const item of document.querySelectorAll('.episode-item')) item.hidden=value!=='all'&&item.dataset.lifecycle!==value;
+    for(const group of document.querySelectorAll('.work-group')) group.hidden=!Array.from(group.querySelectorAll('.episode-item')).some(item=>!item.hidden);
+  }
+  $('library-filter')?.addEventListener('change',filterLibrary);filterLibrary();
   let importToken=null, expectedVersion=null;
   let projectVersion=Number(document.body.dataset.projectVersion);
   async function importFiles(event) {
@@ -60,9 +66,9 @@ async function settingsScreen() {
     $('commit-import').hidden=report.errors.length>0;
   }
   for(const id of ['folder','files']) $(id).addEventListener('change',e=>importFiles(e).catch(error=>notice(error.message)));
-  action('commit-import',async()=>{const result=await api(`/api/imports/${importToken}/commit`,'POST',{expected_version:expectedVersion});location.href=`/projects/${result.project_id}`;});
+  action('commit-import',async()=>{const result=await api(`/api/imports/${importToken}/commit`,'POST',{expected_version:expectedVersion,work_id:$('import-work')?.value||null});location.href=`/projects/${result.project_id}`;});
   action('save-project',async()=>{
-    const saved=await api(`/api/projects/${state.project}`,'PATCH',{expected_version:projectVersion,patch:{title:$('project-title').value,settings:{width:Number($('output-width').value),height:Number($('output-height').value),scenario:$('scenario').value}}});
+    const saved=await api(`/api/projects/${state.project}`,'PATCH',{expected_version:projectVersion,patch:{title:$('project-title').value,work_id:$('project-work').value,work_title:$('work-title').value,lifecycle:$('project-lifecycle').value,settings:{width:Number($('output-width').value),height:Number($('output-height').value),scenario:$('scenario').value}}});
     projectVersion=saved.version;notice('作品設定を保存しました。');
   });
   for(const button of document.querySelectorAll('.save-reference'))button.addEventListener('click',async()=>{

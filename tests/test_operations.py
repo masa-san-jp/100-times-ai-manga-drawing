@@ -255,7 +255,10 @@ def test_folder_export_open_button_and_reloaded_history(cfg, client, tmp_path, c
     assert client.post(f"/api/exports/{eid}/open").status_code == 409
     process_export(cfg)
     result = client.get(f"/api/exports/{eid}").json()["data"]
-    folder = cfg.root / "exports" / eid / "pages"
+    with connect(cfg) as db:
+        row = get(db, "exports", eid)
+    folder = outputs.output_folder(cfg, row)
+    assert "--" in str(folder.relative_to(cfg.root))
     assert result["folder_path"] == str(folder) and folder.is_dir()
     assert "download_url" not in result
     opened = []
@@ -300,14 +303,16 @@ def test_failed_folder_export_does_not_publish_partial_pages(cfg, tmp_path, cloc
 
     monkeypatch.setattr(outputs, "atomic_write", fail_second)
     process_export(cfg)
-    assert not (cfg.root / "exports" / eid).exists()
-    assert not (cfg.root / "exports" / (eid + ".tmp")).exists()
+    with connect(cfg) as db:
+        relative = outputs.export_relative(get(db, "exports", eid))
+    assert not (cfg.root / relative).exists()
+    assert not (cfg.root / relative).with_name(eid + ".tmp").exists()
     with connect(cfg) as db:
         assert get(db, "exports", eid)["state"] == "failed"
         db.execute("UPDATE exports SET state='queued' WHERE id=?", (eid,))
     monkeypatch.setattr(outputs, "atomic_write", original)
     process_export(cfg)
-    folder = cfg.root / "exports" / eid
+    folder = cfg.root / relative
     assert sorted(p.name for p in (folder / "pages").iterdir()) == ["0001.png", "0002.png"]
     # Recovery after folder publication but before DB completion reuses the same snapshot.
     with connect(cfg) as db:

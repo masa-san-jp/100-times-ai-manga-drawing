@@ -34,6 +34,9 @@ def read_plan(cfg, db, value):
 
 def make_plan(cfg, db, pid, request):
     project = get(db, "projects", pid)
+    require(
+        project["lifecycle"] == "active", "inactive", "作品設定で制作中に戻してから生成してください。", 409
+    )
     provider_ready(cfg, json.loads(project["settings_json"]) | request.get("settings", {}))
     count = request.get("candidate_count", 1)
     unit = request.get("unit_reserve_micro", cfg.live_unit_micro if cfg.provider == "gemini" else 1)
@@ -143,6 +146,12 @@ def replay_batch(db, pid, key, payload_hash):
 
 def insert_batch(db, plan, key, payload_hash):
     pid = plan["project_id"]
+    require(
+        get(db, "projects", pid)["lifecycle"] == "active",
+        "inactive",
+        "制作中に戻してから生成してください。",
+        409,
+    )
     require(get(db, "projects", pid)["version"] == plan["project_version"])
     batch_id = uid()
     db.execute(

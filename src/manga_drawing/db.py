@@ -20,11 +20,15 @@ def initialize(cfg):
     with cfg.write_lock(), connect(cfg) as db:
         db.execute("PRAGMA journal_mode=WAL")
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version > 1:
+        if version > 2:
             raise DomainError("migration", "このアプリより新しいDBです。更新版を使用してください。")
         if version == 0:
             script = files("manga_drawing").joinpath("migrations/001_initial.sql").read_text()
             db.executescript("BEGIN IMMEDIATE;\n" + script + "\nPRAGMA user_version=1;COMMIT;")
+
+        if version < 2:
+            script = files("manga_drawing").joinpath("migrations/002_works.sql").read_text()
+            db.executescript("BEGIN IMMEDIATE;\n" + script + "\nPRAGMA user_version=2;COMMIT;")
 
 
 @contextmanager

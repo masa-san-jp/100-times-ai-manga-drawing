@@ -29,6 +29,7 @@ class ImportValidation(Strict):
 
 
 class ImportCommit(Strict):
+    work_id: str | None = None
     expected_version: int | None = None
 
 
@@ -202,21 +203,36 @@ def create_app(cfg=None):
         return {"data": health(cfg)}
 
     @app.get("/")
-    def home(request: Request):
+    def home(request: Request, work: str | None = None):
         with connect(cfg) as db:
-            items = [dict(r) for r in db.execute("SELECT * FROM projects ORDER BY created_at DESC")]
+            items = [
+                dict(r)
+                for r in db.execute("""SELECT p.*, w.title work_title,
+                (SELECT COUNT(*) FROM pages WHERE project_id=p.id) page_count,
+                (SELECT COUNT(*) FROM pages WHERE project_id=p.id AND accepted_candidate_id IS NOT NULL) accepted_count
+                FROM projects p JOIN works w ON w.id=p.work_id ORDER BY w.created_at DESC,p.created_at""")
+            ]
+            works = [dict(r) for r in db.execute("SELECT * FROM works ORDER BY created_at DESC")]
+            if work:
+                get(db, "works", work)
         return templates.TemplateResponse(
-            request=request, name="settings.html", context={"projects": items, "project": None}
+            request=request,
+            name="settings.html",
+            context={"projects": items, "project": None, "works": works, "selected_work": work},
         )
 
     @app.get("/projects/{pid}/settings")
     def settings(request: Request, pid: str):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
+            project["work_title"] = get(db, "works", project["work_id"])["title"]
+            works = [dict(r) for r in db.execute("SELECT * FROM works ORDER BY created_at DESC")]
             project["references"] = projects.references(db, pid)
             project["settings"] = json.loads(project["settings_json"])
         return templates.TemplateResponse(
-            request=request, name="settings.html", context={"project": project, "projects": []}
+            request=request,
+            name="settings.html",
+            context={"project": project, "projects": [], "works": works},
         )
 
     @app.get("/projects/{pid}")
@@ -272,7 +288,7 @@ def create_app(cfg=None):
 
     @app.post("/api/imports/{token}/commit", status_code=201)
     def commit(token: str, body: ImportCommit):
-        return {"data": projects.commit_import(cfg, token, body.expected_version)}
+        return {"data": projects.commit_import(cfg, token, body.expected_version, body.work_id)}
 
     @app.get("/api/projects/{pid}/pages")
     def pages(pid: str, status: str | None = None, cursor: int = 0, limit: int = 40):
@@ -318,10 +334,54 @@ def create_app(cfg=None):
 
     @app.patch("/api/projects/{pid}")
     def patch_project(pid: str, body: Edit):
-        require(set(body.patch) <= {"title", "settings"}, "fields", "未定義の設定です。", 422)
+        require(
+            set(body.patch) <= {"title", "settings", "work_id", "work_title", "lifecycle"},
+            "fields",
+            "未定義の設定です。",
+            422,
+        )
         with transaction(cfg) as db:
             project = get(db, "projects", pid)
             require(project["version"] == body.expected_version)
+            work_id = body.patch.get("work_id", project["work_id"])
+            get(db, "works", work_id)
+            lifecycle = body.patch.get("lifecycle", project["lifecycle"])
+            require(
+                lifecycle in ("active", "completed", "archived"), "lifecycle", "制作状態が不正です。", 422
+            )
+            if lifecycle == "completed":
+                require(
+                    not db.execute(
+                        "SELECT 1 FROM pages WHERE project_id=? AND accepted_candidate_id IS NULL", (pid,)
+                    ).fetchone(),
+                    "unfinished",
+                    "未採用のページがあります。完了にする前に採否を確認してください。",
+                    422,
+                )
+                require(
+                    not db.execute(
+                        "SELECT 1 FROM jobs j JOIN rounds r ON r.id=j.round_id JOIN pages p ON p.id=r.page_id WHERE p.project_id=? AND j.state IN ('queued','running','retry_wait','unknown')",
+                        (pid,),
+                    ).fetchone(),
+                    "unfinished",
+                    "処理中または結果未確認の生成があります。",
+                    422,
+                )
+            work_title = body.patch.get("work_title")
+            if work_title is not None and work_id == project["work_id"]:
+                require(
+                    isinstance(work_title, str) and 0 < len(work_title.strip()) <= 200,
+                    "title",
+                    "作品名を入力してください。",
+                    422,
+                )
+                current_work = get(db, "works", work_id)
+                if current_work["title"] != work_title.strip():
+                    db.execute("UPDATE works SET title=? WHERE id=?", (work_title.strip(), work_id))
+                    db.execute(
+                        "UPDATE projects SET version=version+1 WHERE work_id=? AND id!=?", (work_id, pid)
+                    )
+            db.execute("UPDATE projects SET work_id=?,lifecycle=? WHERE id=?", (work_id, lifecycle, pid))
             settings = json.loads(project["settings_json"]) | body.patch.get("settings", {})
             # Real provider may be saved as disabled configuration, but cannot plan/start.
             require(
@@ -502,7 +562,7 @@ def create_app(cfg=None):
             row = get(db, "exports", eid)
         folder = (
             output_folder(cfg, row)
-            if row["state"] == "complete" and row["archive_path"] == f"exports/{eid}"
+            if row["state"] == "complete" and not row["archive_path"].endswith(".zip")
             else None
         )
         return {

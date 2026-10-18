@@ -2,7 +2,7 @@
 <html lang="ja">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}マンガ下書き{% endblock %}</title>
-<link rel="stylesheet" href="/static/app.css?v=0.2.1"><script src="/static/app.js?v=0.2.1" defer></script></head>
+<link rel="stylesheet" href="/static/app.css?v=0.3.0"><script src="/static/app.js?v=0.3.0" defer></script></head>
 <body data-screen="{% block screen %}{% endblock %}" data-project="{{ project.id if project else '' }}" data-page="{{ page.id if page else '' }}" data-project-version="{{project.version if project else 0}}">
 <header><a class="brand" href="/">マンガ下書き</a><span class="badge">{{ "模擬API・課金なし" if runtime_provider == "mock" else "Gemini・有料API" }}</span><div class="header-end"><span id="worker-status" role="status"></span><label class="theme-label">表示<select id="theme" aria-label="表示モード"><option value="system">OSに合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select></label></div></header>
 <main><div id="notice" role="alert" hidden></div>{% block content %}{% endblock %}</main>

@@ -76,7 +76,11 @@ def matching_manifest(db, pid, manifest):
     return (
         len(expected) == 2
         and [p["number"] for p in expected] == [1, 2]
-        and manifest
+        and {
+            key: value
+            for key, value in manifest.items()
+            if key not in {"work_id", "work_title", "output_relative"}
+        }
         == {
             "provider": "gemini",
             "project_id": pid,

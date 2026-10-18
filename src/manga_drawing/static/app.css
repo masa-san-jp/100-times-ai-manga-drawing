@@ -7,3 +7,5 @@
 @media(max-width:700px){.review-panel .actions{flex-direction:column;align-items:stretch}.review-panel .actions>button{width:100%;flex:auto}.review-panel #accepted-label{display:block;margin:12px 0}}
 
 .export-bar>p,#export-status{width:100%;margin:0}#export-status .muted{overflow-wrap:anywhere}
+
+.episode-item{display:flex;justify-content:space-between;gap:16px;text-decoration:none;margin:8px 0;padding:16px}.episode-item span{color:var(--muted)}.work-group h3{margin:0}.work-group .heading{margin:0 0 16px}@media(max-width:700px){.episode-item{flex-direction:column;gap:4px}.work-group .heading{flex-wrap:wrap}}
