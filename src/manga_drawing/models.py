@@ -31,6 +31,7 @@ class PageInput(Strict):
     characters: list[str] = Field(default_factory=list, max_length=5)
     scene: str | None = None
     page_prompt: str | None = Field(default=None, max_length=20000)
+    prompt_override: str | None = Field(default=None, min_length=1, max_length=20000)
     directions: list[Direction] = Field(default_factory=list)
 
     @model_validator(mode="after")

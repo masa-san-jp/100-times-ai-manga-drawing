@@ -7,6 +7,7 @@ immutable reference revisions; approved generated assets are a separate selectio
 from __future__ import annotations
 
 import json
+from importlib.resources import files
 from pathlib import Path
 import re
 import unicodedata
@@ -16,11 +17,7 @@ from .common import atomic_write, canonical, digest, require, timestamp, uid
 from .db import connect, get, transaction
 from .models import Draft
 
-REFERENCE_RULES = """添付のキャラクタースケッチをもとに、漫画作画用のキャラクターリファレンスシートを1枚作成してください。
-白背景・モノクロ。原案の顔立ち、髪型、体格、衣装、特徴を忠実に保ち、別人に変えないでください。
-同一人物の全身正面・側面・背面と顔の拡大を、重ならない見やすい配置で描いてください。
-設定された身長を守り、全方向で同一の体格・衣装に統一してください。指定のない設定を勝手に追加しないでください。
-漫画のコマ・吹き出し・背景演出は不要です。"""
+REFERENCE_RULES = files("manga_drawing").joinpath("prompt_templates/character-original.txt").read_text().rstrip("\n")
 
 
 def task_for(db, page_id):
@@ -101,15 +98,15 @@ def make_snapshot(cfg, db, page, settings):
     attachments = [
         {"role": "キャラクタースケッチ", "hash": h} for h in json.loads(revision["asset_hashes_json"])
     ]
-    prompt = "\n\n".join(
-        [REFERENCE_RULES, "人物設定\n" + revision["metadata_json"], "追加・修正指示\n" + draft.page_prompt]
-    )
+    prompt = REFERENCE_RULES
+    if draft.page_prompt:
+        prompt += "\n\n追加・修正指示\n" + draft.page_prompt
     require(len(prompt) <= 20000, "prompt_limit", "送信する全文は20000文字までです。", 422)
     payload = {
         "prompt": prompt,
         "attachments": attachments,
         "settings": settings,
-        "template_version": "character-reference-v1",
+        "template_version": "character-reference-author-original-v1",
         "task_type": "character_reference",
         "references": [{"id": ref["id"], "revision": ref["current_revision_id"]}],
     }

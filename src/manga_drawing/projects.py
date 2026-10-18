@@ -50,7 +50,11 @@ def upload(cfg, token, path, content):
 
 
 def validate_import(cfg, token, manifest, project_id=None):
-    manifest = Manifest.model_validate(manifest).model_dump()
+    parsed = Manifest.model_validate(manifest)
+    manifest = parsed.model_dump()
+    for item, model in zip(manifest["pages"], parsed.pages):
+        if "prompt_override" not in model.model_fields_set:
+            item.pop("prompt_override", None)
     folder, meta = import_meta(cfg, token)
     characters = {x["key"] for x in manifest["characters"]}
     scenes = {x["key"] for x in manifest["scenes"]}
@@ -172,6 +176,7 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                 scene=page["scene"],
                 directions=page["directions"],
                 page_prompt=page_prompt,
+                prompt_override=(page["prompt_override"] if "prompt_override" in page else json.loads(existing[0]).get("prompt_override") if existing else None),
             )
             db.execute(
                 """INSERT INTO pages(id,project_id,number,draft_json) VALUES(?,?,?,?)

@@ -1,0 +1,110 @@
+# 漫画清書作業指示書
+
+metadata:
+  role: プロフェッショナル漫画制作スタジオ作画監督
+  task: 商用レベルの高度な漫画清書
+  output_format:
+    width: 1410
+    height: 1920
+    unit: px
+    strict_sizing: true
+
+input_materials:
+  rough_draft:
+    description: モノクロ漫画の下書き
+    components:
+      panel_borders:
+        priority: 最重要
+        description: シーンとカメラワークを表す枠線
+        requirements:
+          - 枠線を間違えずに再現すること
+          - はっきり、くっきりと画面を区切ること
+          - 漫画における最も重要な要素として扱うこと
+      
+      speech_bubbles:
+        priority: 最重要
+        description: キャラクターのセリフが入る吹き出し
+        requirements:
+          - 位置、形、大きさを正確に再現すること
+          - はっきり、くっきりと描画すること
+          - 下書きをよく観察すること
+      
+      artwork:
+        description: キャラクターや背景の下書き
+        requirements:
+          - キャラクターとobjectの配置、大きさ、空間認識を厳密にすること
+          - プロの漫画家のタッチで精密に描くこと
+          - 指示書の内容を参考にすること
+
+  instruction_sheet:
+    description: 下書きにピンクと赤字の指示を加えたもの
+    note: 指示内容は出力画像に一切含めないこと
+    
+    annotations:
+      pink_markings:
+        priority: 2番目に重要
+        description: 読者の視線移動を表す
+        elements:
+          circles: 視線移動の領域を示す
+          arrows: 視線移動の方向を示す
+          numbers: 視線移動の順番を示す
+        requirements:
+          - 丸で囲んだ領域を厳密に特定すること
+          - 矢印または丸数字が表す順番を把握すること
+          - 視線移動の順番に従って画像配置を厳密に調整すること
+          - 丸番号は出力しないこと
+      
+      red_text:
+        description: キャラクターに対する指示
+        character_names:
+          - name: Haruna
+            reference: キャラクターデザインシート参照
+            requirement: 造形を正確に再現すること
+          
+          - name: Chinatsu
+            reference: キャラクターデザインシート参照
+            requirement: 造形を正確に再現すること
+          
+          - name: Akihiko
+            reference: キャラクターデザインシート参照
+            requirement: 造形を正確に再現すること
+          
+          - name: Tohma
+            reference: キャラクターデザインシート参照
+            requirement: 造形を正確に再現すること
+          
+          - name: Extras
+            description: サブキャラクター
+            requirement: 下書きを観察して適当に造形すること
+            note: 通しナンバーが振ってあるサブキャラクターは同一人物
+
+  character_design_sheets:
+    purpose: 主要キャラクターのデザイン統一のためのリファレンス
+    
+    critical_elements:
+      - 各パーツの形
+      - 各パーツの大きさ
+      - 各パーツの位置関係
+    
+    drawing_flexibility:
+      allowed:
+        - 描画の省略
+        - デフォルメ
+      required:
+        - 形の再現
+        - 大きさの再現
+        - 位置関係の再現
+      note: 上記3要素が再現できていれば同一人物と見做せる
+    
+    annotations:
+      character_names:
+        color: red
+        usage: 指示書の人物と対応させる
+      
+      height_information:
+        color: red
+        usage: 人物同士の大きさのバランスを取るために参照
+
+instructions:
+  description: ピンクのト書きの丸番号ごとに指示に従う
+  note: 丸番号は出力しない

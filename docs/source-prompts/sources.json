@@ -1,0 +1,11 @@
+{
+  "notion_source": "https://app.notion.com/p/GenAI-2f2bb868d86780a38bb4d3cb6de6ea83",
+  "title": "男子全員の責任(再編版)-GenAI",
+  "retrieved_at": "2026-10-18",
+  "method": "ログイン済みブラウザーのコードブロック表示値を読み取り専用で取得。本文は要約・校正・補完せず保存。",
+  "individual_prompts": "表示された4欄は「- ①」のひな形のみ。具体的なページ指示なし。",
+  "files": {
+    "notion-system-structured-original.yaml": "a993cbe1feb8cc0ff5a48e42fd96334f8cc26460b49d579d09b04f8f1c36b652",
+    "notion-system-original.txt": "438d0b6122025001c202c1132f592b7f7e5c16fac19d7a8a3d275c859e7f80c5"
+  }
+}

@@ -51,7 +51,7 @@ def test_reference_pipeline_gates_pages_and_uses_approved_generated_image(cfg, t
         assert payload["references"][0]["candidate_id"] == ref["page"]["candidates"][0]["id"]
         reference_snapshot = ref["page"]["latest_round"]["snapshot"]
         assert reference_snapshot["attachments"] == [{"role": "キャラクタースケッチ", "hash": ref["sketch"]}]
-        assert reference_snapshot["template_version"] == "character-reference-v1"
+        assert reference_snapshot["template_version"] == "character-reference-author-original-v1"
         assert len(projects.page_list(db, pid)["items"]) == 1
     listed = client.get("/api/projects").json()["data"]
     assert [x["id"] for x in listed] == [pid]

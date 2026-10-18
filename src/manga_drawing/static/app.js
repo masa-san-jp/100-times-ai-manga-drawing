@@ -241,7 +241,8 @@ async function pagesScreen() {
 async function detailScreen() {
   let page=null, dirty=false, editVersion=null, currentCandidate=null, userSelectedCandidate=false, autoLatestId=null, historyBefore=2147483647;
   const historyCandidates=new Map(), historyRounds=new Map();
-  function markDirty(){$('instruction-save-state').textContent='未保存の作画指示・修正があります';$('prompt-mode-warning').hidden=!$('override-enabled').checked;if(!dirty)editVersion=page?.version;dirty=true;$('dirty').textContent='未保存の変更があります';}
+  function updatePromptMode(){const direct=$('override-enabled').checked;$('prompt-mode-warning').hidden=!direct;for(const id of ['page-prompt','correction','directions','copy-reason'])$(id).disabled=direct;if(direct&&$('prompt-editor-details').dataset.mode!=='direct')$('prompt-editor-details').open=true;$('prompt-editor-details').dataset.mode=direct?'direct':'normal';}
+  function markDirty(){updatePromptMode();$('instruction-save-state').textContent='未保存の作画指示・修正があります';$('prompt-mode-warning').hidden=!$('override-enabled').checked;if(!dirty)editVersion=page?.version;dirty=true;$('dirty').textContent='未保存の変更があります';}
   for(const id of ['page-prompt','correction','directions','prompt-override','override-enabled'])$(id).addEventListener('input',markDirty);
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   function candidate(){return [...page.candidates,...historyCandidates.values()].find(c=>c.id===$('candidate-select').value);}
@@ -273,7 +274,7 @@ async function detailScreen() {
     showCandidate();
     const conflict=dirty&&editVersion!==page.version;$('edit-conflict').hidden=!conflict;if(conflict){$('dirty').textContent='別の画面で更新されています。編集内容を残して競合を確認してください。';$('conflict-saved').textContent=JSON.stringify(page.draft,null,2);}
     if(!dirty){$('instruction-save-state').textContent='保存済み';editVersion=page.version;$('page-prompt').value=page.draft.page_prompt||'';$('correction').value=page.draft.correction;$('directions').value=JSON.stringify(page.draft.directions,null,2);$('override-enabled').checked=page.draft.prompt_override!==null;$('prompt-override').value=page.draft.prompt_override||'';}
-    $('prompt-mode-warning').hidden=!$('override-enabled').checked;
+    updatePromptMode();
     $('job-details').replaceChildren();
     for(const job of page.jobs){if(job.state==='failed'){const b=node('button',`候補${job.candidate_index}の生成を再試行`,'secondary');b.addEventListener('click',()=>operation('retry:'+job.id,async()=>({url:`/api/jobs/${job.id}/retry`,body:{expected_state:'failed',explicit_extra_attempt:true}})).then(refresh).catch(e=>notice(e.message)));$('job-details').append(b);}}
     await checkHealth();
@@ -292,7 +293,7 @@ async function detailScreen() {
   action('accept',()=>decide('accept'),cannotAccept);
   action('reject-save',async()=>{if(dirty)await save();await decide('reject');});
   action('revise',async()=>{const result=await operation('revise:'+state.page,async()=>({url:`/api/pages/${state.page}/revise-and-generate`,body:{expected_version:editVersion,latest_round_id:page.latest_round_id,draft_patch:patch(),reason:$('reason').value,clear_accepted:$('clear-accepted').checked}}));const unchanged=JSON.stringify(patch())===JSON.stringify(result._sentBody.draft_patch);if(unchanged){dirty=false;$('dirty').textContent='保存済み';}else{dirty=true;notice('前回の再生成結果を確認しました。新しい編集内容は未保存のまま保持しています。');}await refresh();});
-  action('preview-prompt',async()=>{const p=await api(`/api/pages/${state.page}/prompt`);if($('override-enabled').checked&&dirty&&!confirm('編集中の全文を保存済みの指示で置き換えますか？'))return;$('prompt-override').value=p.prompt;$('system-prompt').textContent=p.system_prompt?'共通のシステム指示（直接編集の対象外）\n'+p.system_prompt:'';$('attachments').textContent='添付: '+p.attachments.map(a=>a.role+(a.key?' '+a.key:'')).join('、');markDirty();});
+  action('preview-prompt',async()=>{const p=await api(`/api/pages/${state.page}/prompt`);if($('override-enabled').checked&&dirty&&!confirm('編集中の全文を保存済みの指示で置き換えますか？'))return;$('prompt-override').value=p.prompt;$('system-prompt').textContent=p.system_prompt?'保存されたシステム指示\n'+p.system_prompt:'';$('attachments').textContent='添付: '+p.attachments.map(a=>a.role+(a.key?' '+a.key:'')).join('、');markDirty();});
   action('copy-reason',()=>{$('correction').value+='\n'+$('reason').value;markDirty();});
   action('history-more',async()=>{const rows=await api(`/api/pages/${state.page}/history?before=${historyBefore}`);for(const r of rows){historyRounds.set(r.id,r);for(const c of r.candidates)historyCandidates.set(c.id,{...c,round_id:r.id,sequence:r.sequence});}if(rows.length)historyBefore=rows.at(-1).sequence;else $('history-more').hidden=true;await refresh();});
   $('candidate-select').addEventListener('change',()=>{userSelectedCandidate=true;$('restore-old').checked=false;showCandidate();});

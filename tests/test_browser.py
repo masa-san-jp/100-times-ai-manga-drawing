@@ -696,3 +696,20 @@ def test_accepted_preview_distinguishes_new_take(browser_app, cfg, tmp_path, clo
     page.reload()
     expect(page.locator(".generation-phase")).to_have_text("表示テイク1 ／ 新候補テイク2")
     expect(page.locator(".review-status")).to_have_text("採用済み")
+
+
+def test_author_full_prompt_edit_is_visible_and_inactive_inputs_disabled(browser_app, cfg, tmp_path):
+    from manga_drawing import projects
+    from manga_drawing.db import transaction
+
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    item = page_rows(cfg, pid)[0]
+    with transaction(cfg) as db:
+        projects.patch_draft(db, item, {"prompt_override": "AUTHOR ORIGINAL"})
+    page.goto(f"{base}/pages/{item['id']}")
+    expect(page.locator("#prompt-override")).to_be_visible()
+    expect(page.locator("#prompt-override")).to_have_value("AUTHOR ORIGINAL")
+    for field in ["page-prompt", "correction", "directions"]:
+        expect(page.locator(f"#{field}")).to_be_disabled()
+    expect(page.locator("#prompt-mode-warning")).to_contain_text("送信プロンプト全文")
