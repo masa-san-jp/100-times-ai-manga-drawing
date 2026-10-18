@@ -160,7 +160,9 @@ def test_response_loss_replays_operation_after_reload(browser_app, cfg, tmp_path
     page.reload()
     expect(page.locator(".page-card")).to_have_count(1)
     page.locator("#generate").click()
-    expect(page.locator("#generate")).to_be_enabled()
+    expect(page.locator("#plan-summary")).to_contain_text("生成依頼を受付済み")
+    expect(page.locator("#generate")).to_have_text("未生成ページを生成")
+    expect(page.locator("#generate")).to_be_disabled()
     with connect(cfg) as db:
         assert db.execute("SELECT COUNT(*) FROM batches").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
@@ -626,3 +628,24 @@ def test_character_prompt_two_tabs_preserves_unsaved_edits_on_conflict(
             == "Bで保存した指示"
         )
     other.close()
+
+
+def test_workflow_overview_shows_adopted_pages_without_starting_generation(browser_app, cfg, tmp_path, clock):
+    from test_workflow import adopt_all
+
+    pid, _ = make_project(cfg, tmp_path, 2)
+    start(cfg, pid)
+    run(cfg, clock)
+    adopt_all(cfg, pid)
+    page, _, base = browser_app
+    page.goto(f"{base}/projects/{pid}")
+    expect(page.locator("#workflow-pages")).to_contain_text("採用 2 / 2ページ")
+    expect(page.locator("#workflow-message")).to_contain_text("全ページ採用済み")
+    expect(page.locator("#workflow-next")).to_have_text("書き出しへ")
+    expect(page.locator("#generate")).to_be_disabled()
+    expect(page.locator("#regenerate")).to_be_disabled()
+    page.locator("#filter").select_option("review")
+    expect(page.locator("#empty")).to_be_visible()
+    expect(page.locator("#workflow-pages")).to_contain_text("採用 2 / 2ページ")
+    with connect(cfg) as db:
+        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2

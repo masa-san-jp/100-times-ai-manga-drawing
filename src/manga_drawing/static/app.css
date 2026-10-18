@@ -21,3 +21,5 @@
 .character-grid{display:grid;gap:1.5rem}.character-card{min-width:0}.character-images{display:grid;grid-template-columns:1fr 2fr;gap:1rem}.character-images img{display:block;width:100%;max-height:420px;object-fit:contain;background:white;border:1px solid var(--line)}.character-images figure{margin:0;min-width:0}.character-card textarea{width:100%;min-height:7rem}.character-card select{max-width:100%}@media(max-width:600px){.character-images{grid-template-columns:1fr 1fr}}
 
 .character-card pre{white-space:pre-wrap;overflow-wrap:anywhere}
+
+.workflow-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.workflow-counts dt{font-weight:600}.workflow-counts dd{margin:4px 0;overflow-wrap:anywhere}@media(max-width:600px){.workflow-counts{grid-template-columns:1fr;gap:8px}}

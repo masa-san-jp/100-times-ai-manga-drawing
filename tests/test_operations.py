@@ -134,7 +134,7 @@ def test_retry_does_not_create_second_active_round(cfg, tmp_path, clock):
     run(cfg, clock)
     with connect(cfg) as db:
         old = dict(db.execute("SELECT * FROM jobs").fetchone())
-    start(cfg, pid, kind="extra")
+    start(cfg, pid, kind="extra", page_ids=[p["id"] for p in page_rows(cfg, pid)])
     with pytest.raises(DomainError):
         planning.retry(cfg, old["id"], {"expected_state": "failed"}, "retry-old")
 

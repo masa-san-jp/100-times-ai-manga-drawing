@@ -82,7 +82,9 @@ async function settingsScreen() {
 
 async function pagesScreen() {
   action('open-work-folder',async()=>{await api(`/api/projects/${state.project}/folder/open`,'POST');});
-  const selected=new Set(), visiblePages=new Map(); let next=null, loaded=40, busy=false;
+  const selected=new Set(), visiblePages=new Map(); let next=null, loaded=40, busy=false, workflow=null;
+  function pendingGeneration(kind){return !!sessionStorage.getItem('manga-operation:generate:'+state.project+':'+kind);}
+  function generationDisabled(kind){return !pendingGeneration(kind)&&!!workflow&&workflow.pages[kind==='initial'?'not_requested':'rejected']===0;}
   function countSelection(){
     $('selection-count').textContent=selected.size?`生成対象：指定した${selected.size}ページ（採否判定とは別です）`:'生成対象：ボタンに該当する全ページ';
     const boxes=Array.from(document.querySelectorAll('.generation-choice input'));
@@ -91,6 +93,9 @@ async function pagesScreen() {
     $('generate').textContent=selected.size?'指定ページのうち未生成を生成':'未生成ページを生成';
     $('regenerate').textContent=selected.size?'指定ページのうち要修正を再生成':'要修正ページをまとめて再生成';
     $('generate-extra').disabled=selected.size===0;
+    $('generate').disabled=generationDisabled('initial');$('regenerate').disabled=generationDisabled('revision');
+    if(pendingGeneration('initial'))$('generate').textContent='前回の生成依頼の受付を確認';
+    if(pendingGeneration('revision'))$('regenerate').textContent='前回の再生成依頼の受付を確認';
   }
   function showGenerationChoices(){for(const label of document.querySelectorAll('.generation-choice'))label.hidden=!$('batch-selection').open;}
   async function reviewPage(id,decision){
@@ -166,6 +171,8 @@ async function pagesScreen() {
   async function refresh() {
     await checkHealth();
     const p=await api(`/api/projects/${state.project}/progress`);
+    workflow=p.workflow;
+    if(workflow){$('workflow-characters').textContent=`採用 ${workflow.characters.accepted} / ${workflow.characters.total}人`;$('workflow-pages').textContent=`採用 ${workflow.pages.accepted} / ${workflow.pages.total}ページ・未判定 ${workflow.pages.unreviewed}・要修正 ${workflow.pages.rejected}`;$('workflow-export').textContent=workflow.export.status;$('workflow-message').textContent=workflow.message;$('workflow-next').textContent=workflow.action_label;$('workflow-next').href=workflow.action_url;$('workflow-next').hidden=false;}
     $('progress').textContent=Object.entries(p.counts).map(([status,count])=>`${labels[status]} ${count}ページ`).join('　');
     const preserveDiagnostics=(document.activeElement?.matches('input,textarea')&&($('batch-details').contains(document.activeElement)||$('chunk-details').contains(document.activeElement)))||Array.from(document.querySelectorAll('#batch-details input,#chunk-details input')).some(e=>e.dataset.edited==='true');
     if(!preserveDiagnostics){
@@ -198,13 +205,14 @@ async function pagesScreen() {
     }
     await load();
   }
+  $('workflow-next').addEventListener('click',async event=>{if(!['review','revision'].includes(workflow?.phase))return;event.preventDefault();$('filter').value=workflow.phase==='review'?'review':'rejected';selected.clear();try{await load(true);$('page-grid').scrollIntoView({behavior:'smooth'});}catch(e){notice(e.message);}});
   $('filter').addEventListener('change',()=>{selected.clear();load(true).catch(e=>notice(e.message));});
   $('batch-selection').addEventListener('toggle',()=>{showGenerationChoices();if(!$('batch-selection').open){selected.clear();for(const box of document.querySelectorAll('.generation-choice input'))box.checked=false;countSelection();}});
   action('clear-selection',async()=>{selected.clear();await load();});
   $('select-visible').addEventListener('change',()=>{for(const card of $('page-grid').children){$('select-visible').checked?selected.add(card.dataset.id):selected.delete(card.dataset.id);card.querySelector('input').checked=$('select-visible').checked;}countSelection();});
   action('select-filter',async()=>{let cursor=0;do{const r=await api(`/api/projects/${state.project}/pages?limit=100&cursor=${cursor}&status=${$('filter').value}`);r.items.forEach(p=>selected.add(p.id));cursor=r.next_cursor;}while(cursor);await load();});
   action('load-more',()=>load(false,true));
-  action('generate',()=>generate('initial'));action('regenerate',()=>generate('revision'));action('generate-extra',()=>generate('extra'),()=>selected.size===0);
+  action('generate',()=>generate('initial'),()=>generationDisabled('initial'));action('regenerate',()=>generate('revision'),()=>generationDisabled('revision'));action('generate-extra',()=>generate('extra'),()=>selected.size===0);
   function showExportFolder(result) {
     const button=node('button','画像フォルダーを開く','secondary');
     button.addEventListener('click',async()=>{

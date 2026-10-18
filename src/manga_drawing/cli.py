@@ -44,7 +44,7 @@ def example(output, count=3):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="マンガ下書きバッチ")
+    parser = argparse.ArgumentParser(description="100 TIMES AI MANGA DRAWING")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init")
     web = sub.add_parser("web")

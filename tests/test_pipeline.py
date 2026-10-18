@@ -233,7 +233,7 @@ def test_review_old_candidate_preserves_acceptance(cfg, tmp_path, clock):
     page = page_rows(cfg, pid)[0]
     with connect(cfg) as db:
         old = projects.page_detail(db, page["id"])["candidates"][0]
-    start(cfg, pid, kind="extra")
+    start(cfg, pid, kind="extra", page_ids=[p["id"] for p in page_rows(cfg, pid)])
     p = page_rows(cfg, pid)[0]
     planning.review(
         cfg,

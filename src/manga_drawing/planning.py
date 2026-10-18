@@ -54,6 +54,8 @@ def make_plan(cfg, db, pid, request):
             "ページ指定が不正です。",
             422,
         )
+    if kind == "extra":
+        require(wanted, "page_ids", "別候補を追加するページを明示的に指定してください。", 422)
     selected, excluded = [], []
     chunk_sizes = []
     for row in db.execute("SELECT * FROM pages WHERE project_id=? ORDER BY number", (pid,)):
@@ -61,6 +63,8 @@ def make_plan(cfg, db, pid, request):
         if wanted is not None and page["id"] not in wanted:
             continue
         round_ = get(db, "rounds", page["latest_round_id"]) if page["latest_round_id"] else None
+        if page["accepted_candidate_id"] and kind != "extra":
+            continue
         if kind == "initial" and round_:
             continue
         if kind == "revision" and (

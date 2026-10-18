@@ -141,7 +141,7 @@ def health(cfg):
 def create_app(cfg=None):
     cfg = cfg or Config.from_env()
     initialize(cfg)
-    app = FastAPI(title="マンガ下書きバッチ", version="0.2.0")
+    app = FastAPI(title="100 TIMES AI MANGA DRAWING", version="0.2.0")
     app.state.cfg = cfg
     package = Path(__file__).parent
     templates = Jinja2Templates(directory=package / "templates")
@@ -681,6 +681,9 @@ def create_app(cfg=None):
                 for phase, count in page["generation_counts"].items():
                     generation_counts[phase] = generation_counts.get(phase, 0) + count
                 counts[status] = counts.get(status, 0) + 1
+            from .workflow import summarize
+
+            workflow = summarize(db, project, counts) if project["purpose"] == "comic" else None
             batches = [
                 dict(r)
                 for r in db.execute(
@@ -703,6 +706,7 @@ def create_app(cfg=None):
         return {
             "data": {
                 "counts": counts,
+                "workflow": workflow,
                 "generation_summary": " / ".join(
                     f"{projects.GENERATION_LABELS[phase]} {count}件"
                     for phase, count in generation_counts.items()
