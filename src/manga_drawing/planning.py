@@ -77,6 +77,8 @@ def make_plan(cfg, db, pid, request):
             snap, hash_, estimate = snapshot(cfg, db, page, request.get("settings"))
             require(estimate <= cfg.chunk_bytes, "chunk_size", "1要求がチャンク上限を超えています。", 422)
         except DomainError as e:
+            if e.code == "character_reference_required":
+                raise
             excluded.append({"page_id": page["id"], "number": page["number"], "message": e.message})
             continue
         selected.append(
@@ -172,6 +174,14 @@ def insert_batch(db, plan, key, payload_hash):
     for item in plan["pages"]:
         page = get(db, "pages", item["page_id"])
         require(page["version"] == item["version"])
+        for reference in item["snapshot"]["references"]:
+            current = get(db, "reference_sets", reference["id"])
+            require(
+                current["current_revision_id"] == reference["revision"],
+                "stale_reference",
+                "人物・シーン資料が更新されています。生成内容を再確認してください。",
+                409,
+            )
         require(
             not db.execute(
                 """SELECT 1 FROM jobs j JOIN rounds r ON r.id=j.round_id
@@ -266,6 +276,9 @@ def review_in(db, page, request):
         "INSERT INTO review_events VALUES(?,?,?,?,?,?,?)",
         (uid(), page["id"], rid, candidate_id, decision, request.get("reason", ""), timestamp()),
     )
+    from .character_references import review_in as reference_review
+
+    reference_review(db, page, request)
     bump(db, page)
 
 

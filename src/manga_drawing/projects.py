@@ -137,14 +137,23 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                         "INSERT INTO reference_sets(id,project_id,kind,stable_key) VALUES(?,?,?,?)",
                         (rid, pid, kind, ref["key"]),
                     )
+                metadata_json = canonical({k: v for k, v in ref.items() if k != "images"})
+                hashes_json = canonical([mapped[p] for p in ref["images"]])
+                if row:
+                    current = db.execute(
+                        "SELECT v.metadata_json,v.asset_hashes_json FROM reference_sets r JOIN reference_revisions v ON v.id=r.current_revision_id WHERE r.id=?",
+                        (rid,),
+                    ).fetchone()
+                    if current and current[0] == metadata_json and current[1] == hashes_json:
+                        continue
                 revision = uid()
                 db.execute(
                     "INSERT INTO reference_revisions VALUES(?,?,?,?,?)",
                     (
                         revision,
                         rid,
-                        canonical({k: v for k, v in ref.items() if k != "images"}),
-                        canonical([mapped[p] for p in ref["images"]]),
+                        metadata_json,
+                        hashes_json,
                         timestamp(),
                     ),
                 )
@@ -293,7 +302,8 @@ def page_detail(db, page_id):
     page["candidates"] = [
         dict(r)
         for r in db.execute(
-            """SELECT c.*,r.id round_id,r.sequence,j.candidate_index,json_extract(r.snapshot_json,'$.settings.provider') provider
+            """SELECT c.*,r.id round_id,r.sequence,j.candidate_index,json_extract(r.snapshot_json,'$.settings.provider') provider,
+                        json_extract(r.snapshot_json,'$.references[0].revision') source_reference_revision
                         FROM candidates c JOIN jobs j ON j.id=c.job_id JOIN rounds r ON r.id=j.round_id
                         WHERE r.page_id=? ORDER BY r.sequence DESC,j.candidate_index LIMIT 100""",
             (page_id,),

@@ -59,6 +59,12 @@ def export_target(cfg, row):
 def schedule(cfg, pid, request):
     with transaction(cfg) as db:
         project = get(db, "projects", pid)
+        require(
+            project["purpose"] == "comic",
+            "project",
+            "キャラクター資料は漫画ページとして書き出せません。",
+            422,
+        )
         require(project["version"] == request["expected_version"])
         require(request["mode"] in ("complete", "accepted_only"), "mode", "書き出し方法が不正です。", 422)
         pages, missing = [], []
@@ -117,7 +123,9 @@ def schedule(cfg, pid, request):
         ).fetchone()
         if configured:
             manifest["work_folder"] = configured[0]
-            siblings = db.execute("SELECT id,title FROM projects WHERE work_id=?", (work["id"],)).fetchall()
+            siblings = db.execute(
+                "SELECT id,title FROM projects WHERE work_id=? AND purpose='comic'", (work["id"],)
+            ).fetchall()
             manifest["publication_relative"] = "生成結果"
             if len(siblings) > 1:
                 name = readable_name(project["title"], pid).rsplit("--", 1)[0]
@@ -204,7 +212,7 @@ def candidate_filename(number, take, candidate=1):
 def sync_rejected(cfg):
     with cfg.write_lock(), connect(cfg) as db:
         projects = db.execute(
-            "SELECT p.*,s.value work_folder FROM projects p JOIN system s ON s.key='work_folder:'||p.work_id"
+            "SELECT p.*,s.value work_folder FROM projects p JOIN system s ON s.key='work_folder:'||p.work_id WHERE p.purpose='comic'"
         ).fetchall()
         for project in projects:
             rows = db.execute(
@@ -222,7 +230,7 @@ def sync_rejected(cfg):
                 continue
             base = Path(project["work_folder"])
             siblings = db.execute(
-                "SELECT id,title FROM projects WHERE work_id=?", (project["work_id"],)
+                "SELECT id,title FROM projects WHERE work_id=? AND purpose='comic'", (project["work_id"],)
             ).fetchall()
             if len(siblings) > 1:
                 name = readable_name(project["title"], project["id"]).rsplit("--", 1)[0]

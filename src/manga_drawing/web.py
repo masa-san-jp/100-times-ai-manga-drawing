@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import Field
 
-from . import assets, planning, projects
+from . import assets, character_references, planning, projects
 from .common import DomainError, canonical, require, timestamp, uid
 from .config import Config
 from .db import connect, get, initialize, transaction
@@ -41,6 +41,10 @@ class Plan(Strict):
     settings: dict = Field(default_factory=dict)
     unit_reserve_micro: int = Field(default=1, gt=0)
     cap_micro: int | None = Field(default=None, ge=0)
+
+
+class CharacterGenerate(Strict):
+    reference_ids: list[str] | None = Field(default=None, min_length=1, max_length=500)
 
 
 class Start(Strict):
@@ -112,6 +116,7 @@ def health(cfg):
         ).fetchone()
         verified = bool(verified_row and verified_row[0] == "1")
         rejected_error = db.execute("SELECT value FROM system WHERE key='rejected_sync_error'").fetchone()
+        reference_error = db.execute("SELECT value FROM system WHERE key='reference_sync_error'").fetchone()
         pending = db.execute(
             "SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id WHERE j.state IN ('queued','retry_wait') AND json_extract(r.snapshot_json,'$.settings.provider')='gemini'"
         ).fetchone()[0]
@@ -119,6 +124,7 @@ def health(cfg):
         "provider": cfg.provider,
         "live_enabled": cfg.enable_live,
         "rejected_output_error": bool(rejected_error),
+        "reference_output_error": bool(reference_error),
         "live_remaining_requests": max(0, cfg.live_request_limit - reserved)
         if cfg.live_request_limit is not None
         else None,
@@ -217,7 +223,7 @@ def create_app(cfg=None):
                 for r in db.execute("""SELECT p.*, w.title work_title,
                 (SELECT COUNT(*) FROM pages WHERE project_id=p.id) page_count,
                 (SELECT COUNT(*) FROM pages WHERE project_id=p.id AND accepted_candidate_id IS NOT NULL) accepted_count
-                FROM projects p JOIN works w ON w.id=p.work_id ORDER BY w.created_at DESC,p.created_at""")
+                FROM projects p JOIN works w ON w.id=p.work_id WHERE p.purpose='comic' ORDER BY w.created_at DESC,p.created_at""")
             ]
             works = [dict(r) for r in db.execute("SELECT * FROM works ORDER BY created_at DESC")]
             if work:
@@ -228,10 +234,65 @@ def create_app(cfg=None):
             context={"projects": items, "project": None, "works": works, "selected_work": work},
         )
 
+    @app.get("/projects/{pid}/characters")
+    def character_screen(request: Request, pid: str):
+        with connect(cfg) as db:
+            project = get(db, "projects", pid)
+            require(project["purpose"] == "comic", "project", "作品を指定してください。", 422)
+        return templates.TemplateResponse(
+            request=request, name="characters.html", context={"project": project}
+        )
+
+    @app.get("/api/projects/{pid}/characters")
+    def character_list(pid: str):
+        with connect(cfg) as db:
+            get(db, "projects", pid)
+            return {"data": character_references.list_references(db, pid)}
+
+    @app.post("/api/projects/{pid}/characters/generate", status_code=202)
+    def character_generate(pid: str, body: CharacterGenerate, idempotency_key: str = Header()):
+        return {
+            "data": character_references.generate(
+                cfg, pid, body.model_dump(exclude_none=True), idempotency_key
+            )
+        }
+
+    @app.patch("/api/references/{rid}/generation-prompt")
+    def character_prompt(rid: str, body: dict):
+        require(
+            set(body) == {"expected_version", "expected_revision", "prompt"},
+            "fields",
+            "入力項目が不正です。",
+            422,
+        )
+        require(
+            isinstance(body["prompt"], str) and len(body["prompt"]) <= 18000,
+            "prompt",
+            "指示は18000文字までです。",
+            422,
+        )
+        with transaction(cfg) as db:
+            ref = get(db, "reference_sets", rid)
+            require(ref["kind"] == "character", "reference", "人物を指定してください。", 422)
+            require(ref["current_revision_id"] == body["expected_revision"])
+            character_references.ensure_tasks(db, ref["project_id"])
+            task = db.execute(
+                "SELECT page_id FROM character_reference_tasks WHERE reference_id=?", (rid,)
+            ).fetchone()
+            page = get(db, "pages", task[0])
+            require(
+                page["version"] == body["expected_version"]
+                or body["expected_version"] is None
+                and page["version"] == 1
+            )
+            projects.patch_draft(db, page, {"page_prompt": body["prompt"]})
+            return {"data": projects.page_detail(db, page["id"])}
+
     @app.get("/projects/{pid}/settings")
     def settings(request: Request, pid: str):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
+            require(project["purpose"] == "comic", "project", "キャラクター資料画面を開いてください。", 422)
             project["work_title"] = get(db, "works", project["work_id"])["title"]
             works = [dict(r) for r in db.execute("SELECT * FROM works ORDER BY created_at DESC")]
             saved_folder = db.execute(
@@ -262,6 +323,10 @@ def create_app(cfg=None):
     def listing(request: Request, pid: str):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
+            require(project["purpose"] == "comic", "project", "キャラクター資料画面を開いてください。", 422)
+            character_items = character_references.list_references(db, pid)
+            project["character_total"] = len(character_items)
+            project["character_ready"] = sum(bool(r["selection"]) for r in character_items)
             project["work_folder"] = db.execute(
                 "SELECT value FROM system WHERE key=?", (f"work_folder:{project['work_id']}",)
             ).fetchone()[0]
@@ -281,6 +346,7 @@ def create_app(cfg=None):
         with connect(cfg) as db:
             page = projects.page_detail(db, page_id)
             project = get(db, "projects", page["project_id"])
+            require(project["purpose"] == "comic", "project", "キャラクター資料画面を開いてください。", 422)
             previous_page = db.execute(
                 "SELECT id,number FROM pages WHERE project_id=? AND number<? ORDER BY number DESC LIMIT 1",
                 (page["project_id"], page["number"]),
@@ -303,7 +369,14 @@ def create_app(cfg=None):
     @app.get("/api/projects")
     def all_projects():
         with connect(cfg) as db:
-            return {"data": [dict(x) for x in db.execute("SELECT * FROM projects ORDER BY created_at DESC")]}
+            return {
+                "data": [
+                    dict(x)
+                    for x in db.execute(
+                        "SELECT * FROM projects WHERE purpose='comic' ORDER BY created_at DESC"
+                    )
+                ]
+            }
 
     @app.post("/api/imports", status_code=201)
     def new_import():
@@ -513,6 +586,11 @@ def create_app(cfg=None):
             metadata = validated.model_dump(exclude={"images"})
             for h in images:
                 assets.path_for(cfg, db, h)
+            if (
+                canonical(metadata) == revision["metadata_json"]
+                and canonical(images) == revision["asset_hashes_json"]
+            ):
+                return {"data": {"revision_id": ref["current_revision_id"]}}
             ident = uid()
             db.execute(
                 "INSERT INTO reference_revisions VALUES(?,?,?,?,?)",

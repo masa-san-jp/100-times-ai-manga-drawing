@@ -34,7 +34,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>applyTh
 action('close-zoom',()=> $('zoom').close());
 async function checkHealth() {
   const h=await api('/api/health');state.provider=h.provider;
-  $('worker-status').textContent=(h.worker_running?'生成処理は稼働中':'生成処理が停止しています')+(h.provider==='gemini'?' / Gemini':' / 模擬API')+(h.live_remaining_requests!==null&&h.provider==='gemini'?` / 試験用の残り生成回数：${h.live_remaining_requests}`:'')+(h.rejected_output_error?' / 却下候補のファイル保存に失敗（アプリ内の画像は保持）':'');
+  $('worker-status').textContent=(h.worker_running?'生成処理は稼働中':'生成処理が停止しています')+(h.provider==='gemini'?' / Gemini':' / 模擬API')+(h.live_remaining_requests!==null&&h.provider==='gemini'?` / 試験用の残り生成回数：${h.live_remaining_requests}`:'')+(h.reference_output_error?' / キャラクターリファレンスのファイル保存に失敗（アプリ内の画像は保持）':'')+(h.rejected_output_error?' / 却下候補のファイル保存に失敗（アプリ内の画像は保持）':'');
 }
 
 async function settingsScreen() {
@@ -287,11 +287,62 @@ async function detailScreen() {
   await refresh();return refresh;
 }
 
+async function charactersScreen() {
+  const cards=new Map();let busy=false;
+  function command(card,fn){return async()=>{if(busy)return;busy=true;notice('');for(const b of document.querySelectorAll('#character-grid button,#generate-characters'))b.disabled=true;try{await fn();}catch(e){notice(e.message);}finally{busy=false;await refresh();}};}
+  async function save(card){const ref=card.ref;if(card.prompt.value===(ref.page?.draft.page_prompt||'')){card.dirty=false;return;}const page=await api(`/api/references/${ref.id}/generation-prompt`,'PATCH',{expected_version:card.dirty?card.editVersion:ref.page?.version??null,expected_revision:card.dirty?card.editRevision:ref.revision,prompt:card.prompt.value});ref.page=page;card.displayVersion=page.version;card.displayRevision=ref.revision;card.dirty=false;card.unsaved.textContent='修正内容を保存済み';}
+  function create(ref){
+    const root=node('section',undefined,'panel character-card');root.dataset.reference=ref.id;
+    const title=node('h2',ref.name),status=node('p',undefined,'character-state'),generation=node('p',undefined,'muted');
+    const images=node('div',undefined,'character-images');
+    const source=node('figure'),sketch=node('img');sketch.src=`/api/assets/${ref.sketch}`;sketch.alt=ref.name+'の原案スケッチ';source.append(node('figcaption','原案スケッチ'),sketch);
+    const output=node('figure'),image=node('img'),empty=node('p','リファレンスはまだ生成していません。'),select=node('select');select.setAttribute('aria-label',ref.name+'のテイクを選択');image.alt=ref.name+'のリファレンス候補';output.append(node('figcaption','生成したリファレンス'),image,empty,select);images.append(source,output);
+    const label=node('label','生成・修正の指示（任意）'),prompt=node('textarea');prompt.value=ref.page?.draft.page_prompt||'';label.append(prompt);
+    const unsaved=node('p',undefined,'muted');unsaved.setAttribute('role','status');
+    const actions=node('div',undefined,'actions'),saveButton=node('button','修正内容を保存','secondary'),generate=node('button','この人物を生成'),accept=node('button','この候補を採用する'),reject=node('button','要修正にする','secondary'),zoom=node('button','画像を拡大','secondary');actions.append(saveButton,generate,accept,reject,zoom);
+    const history=node('details'),historyTitle=node('summary','最新テイクの生成に使った指示とモデル'),historyText=node('pre');history.append(historyTitle,historyText);
+    const jobs=node('div');root.append(title,node('p',`人物キー：${ref.key}`,'muted'),status,generation,images,label,unsaved,actions,history,jobs);$('character-grid').append(root);
+    const card={root,status,generation,sketch,image,empty,select,prompt,unsaved,saveButton,generate,accept,reject,zoom,historyText,jobs,ref,dirty:false,displayVersion:ref.page?.version??null,displayRevision:ref.revision,round:null};cards.set(ref.id,card);
+    prompt.addEventListener('input',()=>{if(!card.dirty){card.editVersion=card.displayVersion;card.editRevision=card.displayRevision;}card.dirty=true;card.unsaved.textContent='修正内容は未保存です';});
+    saveButton.addEventListener('click',command(card,async()=>{await save(card);notice('修正内容を保存しました。');}));
+    generate.addEventListener('click',command(card,async()=>{await save(card);await operation('character-generate:'+ref.id,async()=>({url:`/api/projects/${state.project}/characters/generate`,body:{reference_ids:[ref.id]}}));notice('生成依頼を受け付けました。画像は完了後に表示します。');}));
+    async function review(decision){await save(card);const p=card.ref.page;await api(`/api/pages/${p.id}/review`,'POST',{expected_version:p.version,latest_round_id:p.latest_round_id,decision,candidate_id:decision==='accept'?select.value:null,reason:prompt.value,restore:true,clear_accepted:decision==='reject'});notice(decision==='accept'?'採用しました。次のページ作画からこのリファレンスを使います。':'要修正にしました。指示を修正し、この人物を再生成してください。');}
+    accept.addEventListener('click',command(card,()=>review('accept')));reject.addEventListener('click',command(card,()=>review('reject')));
+    select.addEventListener('change',()=>paint(card));zoom.addEventListener('click',()=>{if(!select.value)return;$('zoom').querySelector('img').src=image.src;$('zoom').showModal();});
+    return card;
+  }
+  function paint(card){const ref=card.ref,p=ref.page,c=p?.candidates.find(c=>c.id===card.select.value);const active=p&&p.jobs.some(j=>['queued','running','retry_wait','unknown'].includes(j.state));
+    const accepted=p?.candidates.find(c=>c.id===ref.selection?.candidate_id);
+    card.status.textContent=ref.selection?`採用済み：テイク${accepted?.sequence||'?'}をページ作画に使用${c&&c.id!==ref.selection.candidate_id?` ／ 表示中のテイク${c.sequence}は未採用`:'（表示中の候補）'}`:ref.selection_problem==='unavailable'?'採用画像を利用できません・再取得または再生成が必要':p?.accepted_candidate_id?'元資料更新済み・再生成が必要':p?labels[p.status]:'生成未依頼';
+    if(c&&c.source_reference_revision!==ref.revision)card.status.textContent+=' ／ 表示候補の元資料が古いため採用できません';
+    card.generation.textContent=p?.generation_label||'生成未依頼（開始操作をしていません）';card.image.hidden=!c;card.empty.hidden=!!c;card.empty.textContent=p?.latest_round_id?'今回の画像はまだありません。上の処理状況を確認してください。':'リファレンスは生成未依頼です。';card.select.hidden=!c;card.zoom.disabled=busy||!c;if(c)card.image.src=`/api/assets/${c.asset_hash}`;
+    card.generate.textContent=p?.latest_round_id?'この人物を再生成':'この人物を生成';card.generate.disabled=busy||active;card.saveButton.disabled=busy;card.accept.disabled=busy||!c||c.source_reference_revision!==ref.revision||ref.selection?.candidate_id===c?.id;card.reject.disabled=busy||!p?.latest_round_id||active;card.reject.textContent=ref.selection?'採用を解除して要修正にする':'要修正にする';
+    card.historyText.textContent=p?.latest_round?`今回の生成：テイク${p.latest_round.sequence}\nモデル：${p.latest_round.snapshot.settings.model}\n\n${p.latest_round.prompt_text}`:'生成依頼後に表示します。';
+    card.jobs.replaceChildren();for(const job of p?.jobs||[]){if(job.state!=='failed')continue;const retry=node('button','失敗した生成を再試行','secondary');retry.disabled=busy;retry.addEventListener('click',command(card,()=>operation('retry:'+job.id,async()=>({url:`/api/jobs/${job.id}/retry`,body:{expected_state:'failed',explicit_extra_attempt:true}}))));card.jobs.append(retry);}
+  }
+  async function refresh(){if(busy)return;await checkHealth();const refs=await api(`/api/projects/${state.project}/characters`);let ready=0,internal=null;
+    for(const ref of refs){const card=cards.get(ref.id)||create(ref);card.ref=ref;internal=ref.page?.project_id||internal;if(ref.selection)ready++;card.sketch.src=`/api/assets/${ref.sketch}`;
+      if(!card.dirty&&document.activeElement!==card.prompt){card.prompt.value=ref.page?.draft.page_prompt||'';card.displayVersion=ref.page?.version??null;card.displayRevision=ref.revision;}
+      const previous=card.select.value;card.select.replaceChildren();for(const c of ref.page?.candidates||[]){if(c.availability!=='available')continue;const o=node('option',`テイク${c.sequence}・候補${c.candidate_index}${ref.selection?.candidate_id===c.id?'（採用）':''}`);o.value=c.id;card.select.append(o);}
+      if(card.round!==ref.page?.latest_round_id){const latest=ref.page?.candidates.find(c=>c.round_id===ref.page.latest_round_id&&c.availability==='available');card.select.value=latest?.id||ref.selection?.candidate_id||card.select.value;}else if(Array.from(card.select.options).some(o=>o.value===previous))card.select.value=previous;
+      card.round=ref.page?.latest_round_id;paint(card);
+    }
+    $('character-progress').textContent=refs.length?`採用済み ${ready} / ${refs.length} 人`:'キャラクタースケッチが登録されていません。作品設定から資料を登録してください。';$('generate-characters').disabled=!refs.length;
+    $('character-batches').replaceChildren();$('character-recovery').hidden=true;
+    if(internal){const progress=await api(`/api/projects/${internal}/progress`);for(const batch of progress.batches){const blocked=batch.paused||batch.waiting&&batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro>batch.cap_micro;if(!blocked)continue;$('character-recovery').hidden=false;const row=node('div',undefined,'diagnostic');row.append(node('p',batch.paused?'人物の生成開始を一時停止しています。':'再試行に必要な送信枠が不足しています。'));const b=node('button',batch.paused?'待機中の生成を再開':`待機中の${batch.waiting}件を生成する`,'secondary');b.addEventListener('click',command(null,()=>batch.paused?api(`/api/batches/${batch.id}/pause`,'POST',{paused:false}):api(`/api/batches/${batch.id}/budget`,'PATCH',{expected_cap:batch.cap_micro,new_cap:batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro})));row.append(b);$('character-batches').append(row);}for(const chunk of progress.chunks){$('character-recovery').hidden=false;const row=node('div',undefined,'diagnostic');row.append(node('p',chunk.state==='unknown'?'APIの受理・完了状況が不明です。':'生成または画像取得に失敗しました。'));const actions=chunk.state==='unknown'?['reconcile','resend']:chunk.remote_name?['refetch']:[];for(const kind of actions){const b=node('button',{reconcile:'生成結果を再確認',resend:'重複の可能性を承知して再送',refetch:'生成済み画像を再取得'}[kind],'secondary');b.addEventListener('click',command(null,async()=>{if(kind==='resend'&&!confirm('既に生成済みの可能性があり、再送すると重複課金される場合があります。再送しますか？'))return;await operation('resolve:'+chunk.id,async()=>({url:`/api/chunks/${chunk.id}/resolve`,body:{action:kind,expected_state:chunk.state,explicit_duplicate_risk:kind==='resend'}}));}));row.append(b);}$('character-batches').append(row);}}
+  }
+  window.addEventListener('beforeunload',event=>{if(Array.from(cards.values()).some(c=>c.dirty)){event.preventDefault();event.returnValue='';}});
+  document.querySelector(`a[href="/projects/${state.project}"]`).addEventListener('click',async event=>{event.preventDefault();if(busy)return;busy=true;try{for(const card of cards.values())await save(card);location.href=`/projects/${state.project}`;}catch(e){notice(e.message);}finally{busy=false;}});
+  action('generate-characters',async()=>{busy=true;try{for(const card of cards.values())await save(card);await operation('character-generate:'+state.project,async()=>({url:`/api/projects/${state.project}/characters/generate`,body:{}}));notice('対象の人物をまとめて生成依頼しました。');}finally{busy=false;await refresh();}});
+  await refresh();return refresh;
+}
+
 (async()=>{
   try {
     let session=await api('/api/session');if(!session.csrf)session=await api('/api/session');state.csrf=session.csrf;
     await checkHealth();
     let refresh=checkHealth;
+    if(document.body.dataset.screen==='characters')refresh=await charactersScreen();
     if(document.body.dataset.screen==='settings')await settingsScreen();
     if(document.body.dataset.screen==='pages')refresh=await pagesScreen();
     if(document.body.dataset.screen==='detail')refresh=await detailScreen();

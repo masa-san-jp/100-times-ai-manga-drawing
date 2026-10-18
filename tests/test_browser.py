@@ -13,7 +13,7 @@ from playwright.sync_api import expect, sync_playwright
 from manga_drawing.cli import example
 from manga_drawing.db import connect
 from manga_drawing.web import create_app
-from conftest import make_project, page_rows, run, start
+from conftest import make_project, page_rows, run, start, seed_character_references
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("MANGA_BROWSER_TESTS") != "1",
@@ -62,6 +62,7 @@ def test_browser_import_review_regenerate_and_themes(browser_app, cfg, tmp_path,
     expect(page.locator("#commit-import")).to_be_visible()
     page.locator("#commit-import").click()
     page.wait_for_url("**/projects/*")
+    seed_character_references(cfg, page.url.rsplit("/", 1)[1])
     expect(page.locator(".page-card")).to_have_count(3)
     for mode in ("light", "dark"):
         page.locator("#theme").select_option(mode)
@@ -509,6 +510,7 @@ def test_new_user_gets_work_folder_and_outputs_without_settings(
     expect(page.locator("#commit-import")).to_be_visible()
     page.locator("#commit-import").click()
     page.wait_for_url("**/projects/*")
+    seed_character_references(cfg, page.url.rsplit("/", 1)[1])
     expect(page.locator("#open-work-folder")).to_be_visible()
     with connect(cfg) as db:
         pid = db.execute("SELECT id FROM projects").fetchone()[0]
@@ -535,3 +537,92 @@ def test_new_user_gets_work_folder_and_outputs_without_settings(
     run(cfg, clock)
     assert (work / "却下した候補" / "0001_テイク01.png").is_file()
     assert (work / "却下した候補" / "候補一覧.csv").is_file()
+
+
+def test_character_reference_ui_generation_review_and_page_inputs(browser_app, cfg, tmp_path, clock):
+    from manga_drawing import character_references
+    from manga_drawing.db import get
+    from manga_drawing.prompts import snapshot
+
+    pid, _ = make_project(cfg, tmp_path, 1, ready_references=False)
+    page, _, base = browser_app
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{base}/projects/{pid}")
+    page.locator("#generate").click()
+    expect(page.locator("#notice")).to_contain_text("リファレンスを生成して採用")
+    page.get_by_role("link", name="キャラクター資料を開く").click()
+    card = page.locator(".character-card").first
+    expect(card).to_be_visible()
+    card.locator("textarea").fill("正面・側面・背面で髪型を統一。")
+    page.get_by_role("button", name="未生成・要修正の人物をまとめて生成").click()
+    expect(card.locator(".character-state")).to_have_text("生成処理中（未完了）")
+    run(cfg, clock)
+    page.reload()
+    expect(card.locator("select option")).to_have_count(1)
+    expect(card.locator("textarea")).to_have_value("正面・側面・背面で髪型を統一。")
+    page.get_by_role("button", name="この候補を採用する", exact=True).click()
+    expect(card.locator(".character-state")).to_contain_text("採用済み")
+    with connect(cfg) as db:
+        ref = character_references.list_references(db, pid)[0]
+        payload, _, _ = snapshot(cfg, db, get(db, "pages", page_rows(cfg, pid)[0]["id"]))
+        assert (
+            next(a["hash"] for a in payload["attachments"] if a["role"] == "character")
+            == ref["selection"]["asset_hash"]
+        )
+    for theme in ["light", "dark"]:
+        page.locator("#theme").select_option(theme)
+        Path("artifacts/screenshots").mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=f"artifacts/screenshots/characters-{theme}.png", full_page=True)
+    card.locator("textarea").fill("顔をスケッチに近づける。")
+    page.get_by_role("button", name="採用を解除して要修正にする").click()
+    expect(card.locator(".character-state")).to_have_text("要修正")
+    page.get_by_role("button", name="この人物を再生成", exact=True).click()
+    run(cfg, clock)
+    page.reload()
+    expect(card.locator("select option")).to_have_count(2)
+    expect(card.locator("select")).to_have_value(
+        character_references.list_references(connect(cfg), pid)[0]["page"]["candidates"][0]["id"]
+    )
+    page.get_by_role("button", name="この候補を採用する", exact=True).click()
+    expect(card.locator(".character-state")).to_contain_text("採用済み")
+    page.get_by_role("link", name="← ページ一覧").click()
+    page.locator("#generate").click()
+    expect(page.locator("#plan-summary")).to_contain_text("生成依頼を受付済み")
+    assert not errors
+
+
+@pytest.mark.parametrize("focus_only", [False, True])
+def test_character_prompt_two_tabs_preserves_unsaved_edits_on_conflict(
+    browser_app, cfg, tmp_path, focus_only
+):
+    from manga_drawing import character_references
+    from manga_drawing.db import transaction
+
+    pid, _ = make_project(cfg, tmp_path, 1, ready_references=False)
+    with transaction(cfg) as db:
+        character_references.ensure_tasks(db, pid)
+    page, context, base = browser_app
+    page.goto(f"{base}/projects/{pid}/characters")
+    if focus_only:
+        page.locator(".character-card textarea").focus()
+    else:
+        page.locator(".character-card textarea").fill("Aで編集中")
+    other = context.new_page()
+    other.goto(f"{base}/projects/{pid}/characters")
+    other.locator(".character-card textarea").fill("Bで保存した指示")
+    other.get_by_role("button", name="修正内容を保存", exact=True).click()
+    expect(other.locator("#notice")).to_contain_text("保存しました")
+    # Let A's normal polling observe B's updated version while retaining its draft.
+    page.wait_for_timeout(5500)
+    if focus_only:
+        page.locator(".character-card textarea").fill("Aで編集中")
+    page.get_by_role("button", name="修正内容を保存", exact=True).click()
+    expect(page.locator("#notice")).to_contain_text("別の操作で内容が変更")
+    expect(page.locator(".character-card textarea")).to_have_value("Aで編集中")
+    with connect(cfg) as db:
+        assert (
+            character_references.list_references(db, pid)[0]["page"]["draft"]["page_prompt"]
+            == "Bで保存した指示"
+        )
+    other.close()

@@ -34,7 +34,7 @@ def clock():
     return Clock()
 
 
-def make_project(cfg, tmp_path, pages=3, settings=None):
+def make_project(cfg, tmp_path, pages=3, settings=None, ready_references=True):
     folder = tmp_path / f"input-{pages}"
     manifest = example(folder, pages)
     token = projects.create_import(cfg)
@@ -43,6 +43,8 @@ def make_project(cfg, tmp_path, pages=3, settings=None):
     report = projects.validate_import(cfg, token, manifest)
     assert not report["errors"]
     pid = projects.commit_import(cfg, token)["project_id"]
+    if ready_references:
+        seed_character_references(cfg, pid)
     if settings:
         with connect(cfg) as db:
             db.execute("UPDATE projects SET settings_json=? WHERE id=?", (json.dumps(settings), pid))
@@ -78,3 +80,19 @@ def client(cfg):
 def page_rows(cfg, pid):
     with connect(cfg) as db:
         return [dict(r) for r in db.execute("SELECT * FROM pages WHERE project_id=? ORDER BY number", (pid,))]
+
+
+def seed_character_references(cfg, pid):
+    """Unit fixtures treat their synthetic image as an already approved sheet.
+
+    Full reference generation and review are tested separately; no production bypass.
+    """
+    from manga_drawing.common import timestamp
+
+    with connect(cfg) as db:
+        for ref in projects.references(db, pid):
+            if ref["kind"] == "character":
+                db.execute(
+                    "INSERT OR REPLACE INTO character_reference_selections VALUES(?,?,?,?,?)",
+                    (ref["id"], ref["current_revision_id"], None, ref["images"][0], timestamp()),
+                )

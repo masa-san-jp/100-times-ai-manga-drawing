@@ -489,6 +489,18 @@ class Worker:
                     "INSERT OR REPLACE INTO system VALUES('rejected_sync_error',?)", (type(exc).__name__,)
                 )
 
+        from .character_references import sync_files
+
+        try:
+            sync_files(self.cfg)
+            with transaction(self.cfg) as db:
+                db.execute("DELETE FROM system WHERE key='reference_sync_error'")
+        except (DomainError, OSError, ValueError) as exc:
+            with transaction(self.cfg) as db:
+                db.execute(
+                    "INSERT OR REPLACE INTO system VALUES('reference_sync_error',?)", (type(exc).__name__,)
+                )
+
     def check_assets(self):
         with transaction(self.cfg) as db:
             for c in db.execute("SELECT * FROM candidates WHERE availability='available'").fetchall():

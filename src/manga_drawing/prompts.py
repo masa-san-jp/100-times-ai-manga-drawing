@@ -77,12 +77,20 @@ def snapshot(cfg, db, page, overrides=None):
         422,
     )
     require(settings["scenario"] in SCENARIOS, "scenario", "不明な試験シナリオです。", 422)
+    from .character_references import approved_images, make_snapshot, task_for
+
+    if task_for(db, page["id"]):
+        return make_snapshot(cfg, db, page, settings)
     draft = Draft.model_validate_json(page["draft_json"]).model_dump()
     refs = references(db, page["project_id"])
     selected = []
     for key in sorted(set(draft["characters"])):
         match = next((r for r in refs if r["kind"] == "character" and r["stable_key"] == key), None)
         require(match, "missing_reference", f"未登録の人物: {key}", 422)
+        from .character_references import selected as selected_reference
+
+        match["selection"] = selected_reference(db, match)
+        match["images"] = approved_images(db, match)
         selected.append(match)
     if draft["scene"]:
         match = next((r for r in refs if r["kind"] == "scene" and r["stable_key"] == draft["scene"]), None)
@@ -123,6 +131,14 @@ def snapshot(cfg, db, page, overrides=None):
         "attachments": attachments,
         "settings": settings,
         "template_version": TEMPLATE_VERSION,
-        "references": [{"id": r["id"], "revision": r["current_revision_id"]} for r in selected],
+        "references": [
+            {"id": r["id"], "revision": r["current_revision_id"]}
+            | (
+                {"candidate_id": r["selection"]["candidate_id"], "asset_hash": r["selection"]["asset_hash"]}
+                if r.get("selection")
+                else {}
+            )
+            for r in selected
+        ],
     }
     return payload, digest(payload), total
