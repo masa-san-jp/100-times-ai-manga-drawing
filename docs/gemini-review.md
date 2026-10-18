@@ -8,3 +8,8 @@
 | review_product_cost | PASS | 未解決P0/P1/P2ゼロ。独立実行Gemini25試験成功。予算単位、稼働状態、累積上限表示、候補・ZIP・backup由来と文書整合を確認 |
 
 指摘を受け、ネットワーク待機中の書込ロック、事前アップロード障害の無限失敗、壊れた応答の例外、UI省略時の予算単位、healthのheartbeat判定、上限待ちの表示、成果物のprovider記録を修正した。
+
+
+## 設定導線と事前確認の追加レビュー
+
+同日、ユーザーの設定場所を明確にするため、cwd直下の`.env`読込、`.env.example`、`manga live-check`を追加した。review_reliabilityとreview_product_costの両担当がPASS。補間無効・環境変数優先・秘密値非表示・無通信・データ未初期化を独立検証した。製品担当の軽微指摘を受け、未予約ジョブを含む既存Gemini処理も準備条件に追加した。

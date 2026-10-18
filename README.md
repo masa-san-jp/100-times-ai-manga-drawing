@@ -27,7 +27,7 @@ uv run manga web
 
 別ターミナルで `uv run manga worker` を実行し、[ローカル画面](http://127.0.0.1:8765)を開きます。APIキーは不要です。
 
-`uv run manga example --output /tmp/manga-example --pages 3` でサンプル資料を作成し、画面からフォルダーを登録できます。モック候補は試験画像であり、実際のAI作画ではありません。詳しくは[起動と運用手順](docs/operations.md)を参照してください。
+`uv run manga example --output /tmp/manga-example --pages 3` でサンプル資料を作成し、画面からフォルダーを登録できます。モック候補は試験画像であり、実際のAI作画ではありません。詳しくは[起動と運用手順](docs/operations.md)を参照してください。Gemini用の設定はリポジトリ直下の`.env`に記入します（[テンプレート](.env.example)、[設定手順](docs/operations.md#設定場所と確認)）。
 
 ## Outline
 

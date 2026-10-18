@@ -44,7 +44,7 @@ def example(output, count=3):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="マンガ下書きバッチ モック版")
+    parser = argparse.ArgumentParser(description="マンガ下書きバッチ")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init")
     web = sub.add_parser("web")
@@ -52,6 +52,7 @@ def main():
     worker = sub.add_parser("worker")
     worker.add_argument("--once", action="store_true")
     sub.add_parser("doctor")
+    sub.add_parser("live-check", help="実送信せずT14に必要な設定と残り3要求の枠を確認")
     back = sub.add_parser("backup")
     back.add_argument("--output", required=True)
     rest = sub.add_parser("restore")
@@ -64,6 +65,14 @@ def main():
     try:
         if args.command == "example":
             example(args.output, args.pages)
+            return
+        if args.command == "live-check":
+            from .maintenance import live_check
+
+            report = live_check(cfg)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            if not report["ready"]:
+                sys.exit(1)
             return
         if args.command == "restore":
             from .export import restore
@@ -91,7 +100,8 @@ def main():
             if not report["ok"]:
                 sys.exit(1)
         else:
-            print(f"Ready: {cfg.root} (模擬API・課金なし)")
+            mode = "Gemini・実送信設定はlive-checkで確認" if cfg.provider == "gemini" else "模擬API・課金なし"
+            print(f"Ready: {cfg.root} ({mode})")
     except (DomainError, ValueError) as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)

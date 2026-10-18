@@ -9,6 +9,8 @@ import sys
 import threading
 from dataclasses import dataclass, field
 
+from dotenv import dotenv_values
+
 _locks: dict[str, threading.RLock] = {}
 _guard = threading.Lock()
 _local = threading.local()
@@ -30,15 +32,17 @@ class Config:
 
     @classmethod
     def from_env(cls):
+        # Read only the explicit working directory, never search parents or mutate process env.
+        env = dotenv_values(Path.cwd() / ".env", interpolate=False) | dict(os.environ)
         base = Path.home() / ("Library/Application Support" if sys.platform == "darwin" else ".local/share")
         return cls(
-            Path(os.environ.get("MANGA_DATA_DIR", base / "manga-drawing")).expanduser().resolve(),
-            provider=os.environ.get("MANGA_PROVIDER", "mock"),
-            enable_live=os.environ.get("MANGA_ENABLE_LIVE") == "1",
-            gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
-            live_request_limit=int(os.environ.get("MANGA_LIVE_MAX_REQUESTS", "0")),
-            live_unit_micro=int(os.environ.get("MANGA_LIVE_UNIT_RESERVE_MICRO_USD", "0")),
-            poll_interval=60.0 if os.environ.get("MANGA_PROVIDER") == "gemini" else 1.0,
+            Path(env.get("MANGA_DATA_DIR") or base / "manga-drawing").expanduser().resolve(),
+            provider=env.get("MANGA_PROVIDER") or "mock",
+            enable_live=env.get("MANGA_ENABLE_LIVE") == "1",
+            gemini_api_key=env.get("GEMINI_API_KEY") or "",
+            live_request_limit=int(env.get("MANGA_LIVE_MAX_REQUESTS") or "0"),
+            live_unit_micro=int(env.get("MANGA_LIVE_UNIT_RESERVE_MICRO_USD") or "0"),
+            poll_interval=60.0 if env.get("MANGA_PROVIDER") == "gemini" else 1.0,
         )
 
     def prepare(self):
