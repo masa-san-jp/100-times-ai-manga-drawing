@@ -786,6 +786,13 @@ def create_app(cfg=None):
 
         with connect(cfg) as db:
             snap, hash_, _ = snapshot(cfg, db, get(db, "pages", page_id))
-        return {"data": {"prompt": snap["prompt"], "system_prompt": snap.get("system_prompt", ""), "attachments": snap["attachments"], "hash": hash_}}
+        return {
+            "data": {
+                "prompt": snap["prompt"],
+                "system_prompt": snap.get("system_prompt", ""),
+                "attachments": snap["attachments"],
+                "hash": hash_,
+            }
+        }
 
     return app

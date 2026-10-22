@@ -177,8 +177,22 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                 scene=page["scene"],
                 directions=page["directions"],
                 page_prompt=page_prompt,
-                base_prompt=(page["base_prompt"] if "base_prompt" in page else json.loads(existing[0]).get("base_prompt") if existing else None),
-                prompt_override=(page["prompt_override"] if "prompt_override" in page else None if page.get("base_prompt") is not None else json.loads(existing[0]).get("prompt_override") if existing else None),
+                base_prompt=(
+                    page["base_prompt"]
+                    if "base_prompt" in page
+                    else json.loads(existing[0]).get("base_prompt")
+                    if existing
+                    else None
+                ),
+                prompt_override=(
+                    page["prompt_override"]
+                    if "prompt_override" in page
+                    else None
+                    if page.get("base_prompt") is not None
+                    else json.loads(existing[0]).get("prompt_override")
+                    if existing
+                    else None
+                ),
             )
             db.execute(
                 """INSERT INTO pages(id,project_id,number,draft_json) VALUES(?,?,?,?)

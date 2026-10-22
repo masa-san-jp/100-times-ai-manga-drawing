@@ -697,12 +697,16 @@ def test_accepted_preview_distinguishes_new_take(browser_app, cfg, tmp_path, clo
     item = page_rows(cfg, pid)[0]
     with connect(cfg) as db:
         candidate_id = projects.page_detail(db, item["id"])["candidates"][0]["id"]
-    planning.review(cfg, item["id"], {
-        "expected_version": item["version"],
-        "latest_round_id": item["latest_round_id"],
-        "decision": "accept",
-        "candidate_id": candidate_id,
-    })
+    planning.review(
+        cfg,
+        item["id"],
+        {
+            "expected_version": item["version"],
+            "latest_round_id": item["latest_round_id"],
+            "decision": "accept",
+            "candidate_id": candidate_id,
+        },
+    )
     start(cfg, pid, kind="extra", page_ids=[item["id"]])
     page.goto(f"{base}/projects/{pid}")
     expect(page.locator(".generation-phase")).to_contain_text("表示テイク1 ／ テイク2")
