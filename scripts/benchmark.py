@@ -7,11 +7,31 @@ import sys
 import tempfile
 import time
 
+from manga_drawing import character_references, planning, projects
 from manga_drawing.cli import example
 from manga_drawing.config import Config
 from manga_drawing.db import connect, initialize, transaction
-from manga_drawing import planning, projects
 from manga_drawing.worker import Worker
+
+
+def adopt_example_reference(cfg, pid, worker):
+    """Comic pages cannot be planned until the example character sheet is accepted."""
+    character_references.generate(cfg, pid, {}, "benchmark-reference")
+    worker.tick()
+    worker.tick()
+    with connect(cfg) as db:
+        page = character_references.list_references(db, pid)[0]["page"]
+    planning.review(
+        cfg,
+        page["id"],
+        {
+            "expected_version": page["version"],
+            "latest_round_id": page["latest_round_id"],
+            "decision": "accept",
+            "candidate_id": page["candidates"][0]["id"],
+            "restore": True,
+        },
+    )
 
 
 def main():
@@ -26,15 +46,25 @@ def main():
             projects.upload(cfg, token, file.name, file.read_bytes())
         projects.validate_import(cfg, token, manifest)
         pid = projects.commit_import(cfg, token)["project_id"]
+        worker = Worker(cfg)
+        adopt_example_reference(cfg, pid, worker)
         with transaction(cfg) as db:
             plan = planning.make_plan(cfg, db, pid, {"candidate_count": 3})
         planning.start(cfg, pid, plan["plan_token"], "benchmark")
-        worker = Worker(cfg)
         worker.tick()
         worker.tick()
         with connect(cfg) as db:
-            succeeded = db.execute("SELECT COUNT(*) FROM jobs WHERE state='succeeded'").fetchone()[0]
-            candidates = db.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
+            succeeded = db.execute(
+                """SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id
+                JOIN pages p ON p.id=r.page_id WHERE p.project_id=? AND j.state='succeeded'""",
+                (pid,),
+            ).fetchone()[0]
+            candidates = db.execute(
+                """SELECT COUNT(*) FROM candidates c JOIN jobs j ON j.id=c.job_id
+                JOIN rounds r ON r.id=j.round_id JOIN pages p ON p.id=r.page_id
+                WHERE p.project_id=?""",
+                (pid,),
+            ).fetchone()[0]
             first = projects.page_list(db, pid)
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         rss_bytes = rss if sys.platform == "darwin" else rss * 1024

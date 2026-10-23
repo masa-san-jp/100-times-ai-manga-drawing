@@ -21,6 +21,35 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _wait_until_interactive(page):
+    # The document load event fires while #app-main is still inert. Playwright 1.64
+    # still reports those fields as editable, and fill() then inserts nothing.
+    expect(page.locator("#app-loading")).to_be_hidden()
+
+
+def _instrument(page):
+    goto, reload, wait_for_url = page.goto, page.reload, page.wait_for_url
+
+    def goto_ready(url, **kwargs):
+        response = goto(url, **kwargs)
+        _wait_until_interactive(page)
+        return response
+
+    def reload_ready(**kwargs):
+        response = reload(**kwargs)
+        _wait_until_interactive(page)
+        return response
+
+    def wait_for_url_ready(url, **kwargs):
+        wait_for_url(url, **kwargs)
+        _wait_until_interactive(page)
+
+    page.goto = goto_ready
+    page.reload = reload_ready
+    page.wait_for_url = wait_for_url_ready
+    return page
+
+
 @pytest.fixture
 def browser_app(cfg, request):
     sock = socket.socket()
@@ -39,7 +68,13 @@ def browser_app(cfg, request):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
-        page = context.new_page()
+        new_page = context.new_page
+
+        def new_page_ready(*args, **kwargs):
+            return _instrument(new_page(*args, **kwargs))
+
+        context.new_page = new_page_ready
+        page = new_page_ready()
         yield page, context, f"http://127.0.0.1:{port}"
         browser.close()
     server.should_exit = True
