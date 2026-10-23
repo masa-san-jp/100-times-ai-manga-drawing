@@ -22,8 +22,14 @@ def test_author_originals_are_anchored():
     source = json.loads(SOURCE.read_text())
     assert RULES == source["pages"][0]["text"]
     assert REFERENCE_RULES == source["character_reference"]
-    assert hashlib.sha256(RULES.encode()).hexdigest() == "e035e5a26f0691e7c5eed8a0b1f97cefd426a31ef47b1d1d53c69fa2241b22b5"
-    assert hashlib.sha256(REFERENCE_RULES.encode()).hexdigest() == "fb0eb02b50b7c7af944c9aef9998f634f622aba2790dc8bf3f815152f942898a"
+    assert (
+        hashlib.sha256(RULES.encode()).hexdigest()
+        == "e035e5a26f0691e7c5eed8a0b1f97cefd426a31ef47b1d1d53c69fa2241b22b5"
+    )
+    assert (
+        hashlib.sha256(REFERENCE_RULES.encode()).hexdigest()
+        == "fb0eb02b50b7c7af944c9aef9998f634f622aba2790dc8bf3f815152f942898a"
+    )
 
 
 @pytest.mark.parametrize("field", ["prompt_override", "base_prompt"])
@@ -75,12 +81,16 @@ def test_reimport_preserves_original_unless_explicitly_cleared(cfg, tmp_path):
     manifest["pages"][0].pop("prompt_override")
     assert commit(manifest, pid) == pid
     with connect(cfg) as db:
-        draft = json.loads(db.execute("SELECT draft_json FROM pages WHERE project_id=?", (pid,)).fetchone()[0])
+        draft = json.loads(
+            db.execute("SELECT draft_json FROM pages WHERE project_id=?", (pid,)).fetchone()[0]
+        )
         assert draft["prompt_override"] == RULES
     manifest["pages"][0]["prompt_override"] = None
     commit(manifest, pid)
     with connect(cfg) as db:
-        draft = json.loads(db.execute("SELECT draft_json FROM pages WHERE project_id=?", (pid,)).fetchone()[0])
+        draft = json.loads(
+            db.execute("SELECT draft_json FROM pages WHERE project_id=?", (pid,)).fetchone()[0]
+        )
         assert draft["prompt_override"] is None
 
 
@@ -108,7 +118,11 @@ def test_explicit_base_import_replaces_legacy_override(cfg, tmp_path):
         assert draft["prompt_override"] is None
         assert draft["base_prompt"] == "NEW"
         assert snapshot(cfg, db, row)[0]["prompt"].startswith("NEW\n\n")
-        projects.patch_draft(db, row, {"base_prompt": draft["base_prompt"], "prompt_override": None, "page_prompt": "USER NOTE"})
+        projects.patch_draft(
+            db,
+            row,
+            {"base_prompt": draft["base_prompt"], "prompt_override": None, "page_prompt": "USER NOTE"},
+        )
         row = dict(db.execute("SELECT * FROM pages WHERE project_id=?", (pid,)).fetchone())
         sent = snapshot(cfg, db, row)[0]["prompt"]
         assert sent.startswith("NEW\n\n") and "USER NOTE" in sent and "OLD" not in sent

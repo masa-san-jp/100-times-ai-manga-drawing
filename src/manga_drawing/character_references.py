@@ -17,7 +17,9 @@ from .common import atomic_write, canonical, digest, require, timestamp, uid
 from .db import connect, get, transaction
 from .models import Draft
 
-REFERENCE_RULES = files("manga_drawing").joinpath("prompt_templates/character-original.txt").read_text().rstrip("\n")
+REFERENCE_RULES = (
+    files("manga_drawing").joinpath("prompt_templates/character-original.txt").read_text().rstrip("\n")
+)
 
 
 def task_for(db, page_id):

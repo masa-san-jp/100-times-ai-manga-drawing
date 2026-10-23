@@ -159,6 +159,7 @@ def test_offline_sdk_protocol_and_full_pipeline(live, tmp_path, clock):
         request = json.loads(next(iter(fake.inputs.values())).splitlines()[0])
         assert "snapshot" not in request
         from manga_drawing.prompts import RULES
+
         assert "systemInstruction" not in request["request"]
         assert request["request"]["contents"][0]["parts"][0]["text"].startswith(RULES + "\n\n演出\n")
         assert request["request"]["generation_config"]["maxOutputTokens"] == 32768
