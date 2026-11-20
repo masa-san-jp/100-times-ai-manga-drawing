@@ -242,6 +242,12 @@ async function detailScreen() {
   let page=null, dirty=false, editVersion=null, currentCandidate=null, userSelectedCandidate=false, autoLatestId=null, historyBefore=2147483647;
   const historyCandidates=new Map();
   function markDirty(){$('instruction-save-state').textContent='未保存の作画指示・修正があります';if(!dirty)editVersion=page?.version;dirty=true;$('dirty').textContent='未保存の変更があります';}
+  const characterChoices=[...document.querySelectorAll('#page-characters input')];
+  const chosenCharacters=()=>characterChoices.filter(input=>input.checked).map(input=>input.value);
+  for(const input of characterChoices)input.addEventListener('change',()=>{
+    if(chosenCharacters().length>5){input.checked=false;notice('登場人物は5人までです。');return;}
+    markDirty();
+  });
   for(const id of ['page-prompt','correction'])$(id).addEventListener('input',markDirty);
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
   function candidate(){return [...page.candidates,...historyCandidates.values()].find(c=>c.id===$('candidate-select').value);}
@@ -254,7 +260,7 @@ async function detailScreen() {
     $('accept').disabled=cannotAccept();
     $('accept-help').textContent=alreadyAccepted?'':!c?'今回の候補画像が届くと採用できます。':isOld?'表示中は過去の版です。採用する場合は上の確認欄にチェックしてください。':'';
   }
-  function patch(){return {page_prompt:$('page-prompt').value,correction:$('correction').value,base_prompt:page.draft.prompt_override??page.draft.base_prompt??null,prompt_override:null};}
+  function patch(){return {characters:characterChoices.length?chosenCharacters():page.draft.characters,page_prompt:$('page-prompt').value,correction:$('correction').value,base_prompt:page.draft.prompt_override??page.draft.base_prompt??null,prompt_override:null};}
   async function refresh() {
     const fetched=await api(`/api/pages/${state.page}`);
     if(page&&fetched.version<page.version)return;
@@ -272,7 +278,7 @@ async function detailScreen() {
     else if(page.accepted_candidate_id&&unique.has(page.accepted_candidate_id))select.value=page.accepted_candidate_id;
     showCandidate();
     const conflict=dirty&&editVersion!==page.version;$('edit-conflict').hidden=!conflict;if(conflict){$('dirty').textContent='別の画面で更新されています。編集内容を残して競合を確認してください。';$('conflict-saved').textContent=JSON.stringify(page.draft,null,2);}
-    if(!dirty){$('instruction-save-state').textContent='保存済み';editVersion=page.version;$('page-prompt').value=page.draft.page_prompt||'';$('correction').value=page.draft.correction;}
+    if(!dirty){$('instruction-save-state').textContent='保存済み';editVersion=page.version;$('page-prompt').value=page.draft.page_prompt||'';$('correction').value=page.draft.correction;for(const input of characterChoices)input.checked=page.draft.characters.includes(input.value);}
     if(historyBefore===2147483647)$('history-more').hidden=page.candidates.length<100;
     $('job-details').replaceChildren();
     for(const job of page.jobs){if(job.state==='failed'){const b=node('button',`候補${job.candidate_index}の生成を再試行`,'secondary');b.addEventListener('click',()=>operation('retry:'+job.id,async()=>({url:`/api/jobs/${job.id}/retry`,body:{expected_state:'failed',explicit_extra_attempt:true}})).then(refresh).catch(e=>notice(e.message)));$('job-details').append(b);}}
@@ -309,13 +315,23 @@ async function charactersScreen() {
     const images=node('div',undefined,'character-images');
     const source=node('figure'),sketch=node('img');sketch.src=`/api/assets/${ref.sketch}`;sketch.alt=ref.name+'の原案スケッチ';source.append(node('figcaption','スケッチ'),sketch);
     const output=node('figure'),image=node('img'),empty=node('p','リファレンスはまだ生成していません。'),select=node('select');select.setAttribute('aria-label',ref.name+'のテイクを選択');image.alt=ref.name+'のリファレンス候補';output.append(node('figcaption','設定画'),image,empty,select);images.append(source,output);
+    const identity=node('fieldset'),nameLabel=node('label','名前'),nameInput=node('input'),heightLabel=node('label','身長（cm）'),heightInput=node('input'),saveIdentity=node('button','名前・身長を保存','secondary');
+    identity.append(node('legend','設定画に記載する情報'),nameLabel,heightLabel,saveIdentity);
+    nameInput.required=true;nameInput.maxLength=200;nameLabel.append(nameInput);nameInput.value=ref.name;
+    heightInput.type='number';heightInput.min='0';heightInput.max='500';heightInput.step='any';heightInput.required=true;heightLabel.append(heightInput);heightInput.value=ref.height_cm??'';
     const label=node('label','修正指示'),prompt=node('textarea');prompt.value=ref.page?.draft.page_prompt||'';label.append(prompt);
     const unsaved=node('p',undefined,'muted');unsaved.setAttribute('role','status');
     const actions=node('div',undefined,'actions'),saveButton=node('button','保存','secondary'),generate=node('button','この人物を生成'),accept=node('button','採用'),reject=node('button','要修正','secondary'),zoom=node('button','画像を拡大','secondary');actions.append(saveButton,generate,accept,reject,zoom);
     saveButton.setAttribute('aria-label','修正内容を保存');accept.setAttribute('aria-label','この候補を採用する');
     const history=node('details'),historyTitle=node('summary','最新テイクの指示'),historyText=node('pre');history.append(historyTitle,historyText);
-    const keyLabel=node('p',ref.key,'muted');const jobs=node('div');root.append(title,keyLabel,status,generation,images,label,unsaved,actions,history,jobs);$('character-grid').append(root);
-    const card={root,keyLabel,status,generation,sketch,image,empty,select,prompt,unsaved,saveButton,generate,accept,reject,zoom,historyText,jobs,ref,dirty:false,displayVersion:ref.page?.version??null,displayRevision:ref.revision,round:null};cards.set(ref.id,card);
+    const keyLabel=node('p',ref.key,'muted');const jobs=node('div');root.append(title,keyLabel,status,generation,identity,images,label,unsaved,actions,history,jobs);$('character-grid').append(root);
+    const card={root,title,identity,nameInput,heightInput,identityDirty:false,keyLabel,status,generation,sketch,image,empty,select,prompt,unsaved,saveButton,generate,accept,reject,zoom,historyText,jobs,ref,dirty:false,displayVersion:ref.page?.version??null,displayRevision:ref.revision,round:null};cards.set(ref.id,card);
+    for(const input of [nameInput,heightInput])input.addEventListener('input',()=>{if(!card.identityDirty)card.identityRevision=card.ref.revision;card.identityDirty=true;paint(card);});
+    saveIdentity.addEventListener('click',command(card,async()=>{
+      if(!nameInput.value.trim()||!heightInput.reportValidity()||heightInput.valueAsNumber<=0)throw new Error('名前と身長（cm）を入力してください。');
+      await api(`/api/references/${ref.id}`,'PATCH',{expected_revision:card.identityRevision??card.ref.revision,metadata:{name:nameInput.value.trim(),height_cm:heightInput.valueAsNumber}});
+      card.identityDirty=false;card.identityRevision=null;notice('名前・身長を保存しました。設定画の記載を確認してください。');
+    }));
     prompt.addEventListener('input',()=>{if(!card.dirty){card.editVersion=card.displayVersion;card.editRevision=card.displayRevision;}card.dirty=true;card.unsaved.textContent='修正内容は未保存です';});
     saveButton.addEventListener('click',command(card,async()=>{await save(card);notice('修正内容を保存しました。');}));
     generate.addEventListener('click',command(card,async()=>{await save(card);await operation('character-generate:'+ref.id,async()=>({url:`/api/projects/${state.project}/characters/generate`,body:{reference_ids:[ref.id]}}));notice('生成依頼を受け付けました。画像は完了後に表示します。');}));
@@ -327,15 +343,15 @@ async function charactersScreen() {
   function paint(card){const ref=card.ref,p=ref.page,c=p?.candidates.find(c=>c.id===card.select.value);const active=p&&p.jobs.some(j=>['queued','running','retry_wait','unknown'].includes(j.state));
     const accepted=p?.candidates.find(c=>c.id===ref.selection?.candidate_id);
     card.status.textContent=ref.selection?`採用済み：テイク${accepted?.sequence||'?'}${c&&c.id!==ref.selection.candidate_id?` ／ 表示：テイク${c.sequence}（未採用）`:''}`:ref.selection_problem==='unavailable'?'採用画像を利用できません・再取得または再生成が必要':p?.accepted_candidate_id?'元資料更新済み・再生成が必要':p?labels[p.status]:'生成未依頼';
-    if(c&&c.source_reference_revision!==ref.revision)card.status.textContent+=' ／ 表示候補の元資料が古いため採用できません';
+    if(!ref.height_cm)card.status.textContent+=' ／ 名前・身長を入力してください';else if(c&&!c.identity_labelled)card.status.textContent+=' ／ 現在の名前・身長が記載されていないため採用できません';
     card.generation.textContent=p?.generation_label||'生成未依頼（開始操作をしていません）';card.image.hidden=!c;card.empty.hidden=!!c;card.empty.textContent=p?.latest_round_id?'今回の画像はまだありません。上の処理状況を確認してください。':'リファレンスは生成未依頼です。';card.select.hidden=!c;card.zoom.disabled=busy||!c;if(c)card.image.src=`/api/assets/${c.asset_hash}`;
     if(c&&ref.selection?.candidate_id===c.id)card.image.src=`/api/assets/${ref.selection.asset_hash}`;
-    card.generate.textContent=p?.latest_round_id?'再生成':'生成';card.generate.setAttribute('aria-label',p?.latest_round_id?'この人物を再生成':'この人物を生成');card.generate.disabled=busy||active;card.saveButton.disabled=busy;card.accept.disabled=busy||!c||c.source_reference_revision!==ref.revision||ref.selection?.candidate_id===c?.id;card.reject.disabled=busy||!p?.latest_round_id||active;card.reject.textContent=ref.selection?'採用解除・要修正':'要修正';card.reject.setAttribute('aria-label',ref.selection?'採用を解除して要修正にする':'要修正にする');card.generation.hidden=!!c&&!active;
+    card.generate.textContent=p?.latest_round_id?'再生成':'生成';card.generate.setAttribute('aria-label',p?.latest_round_id?'この人物を再生成':'この人物を生成');card.generate.disabled=busy||active||card.identityDirty||!ref.height_cm;card.saveButton.disabled=busy;card.accept.disabled=busy||!c?.identity_labelled||card.identityDirty||ref.selection?.candidate_id===c?.id;card.reject.disabled=busy||!p?.latest_round_id||active;card.reject.textContent=ref.selection?'採用解除・要修正':'要修正';card.reject.setAttribute('aria-label',ref.selection?'採用を解除して要修正にする':'要修正にする');card.generation.hidden=!!c&&!active;
     card.historyText.textContent=p?.latest_round?`今回の生成：テイク${p.latest_round.sequence}\nモデル：${p.latest_round.snapshot.settings.model}\n\n${p.latest_round.prompt_text}`:'生成依頼後に表示します。';
     card.jobs.replaceChildren();for(const job of p?.jobs||[]){if(job.state!=='failed')continue;const retry=node('button','失敗した生成を再試行','secondary');retry.disabled=busy;retry.addEventListener('click',command(card,()=>operation('retry:'+job.id,async()=>({url:`/api/jobs/${job.id}/retry`,body:{expected_state:'failed',explicit_extra_attempt:true}}))));card.jobs.append(retry);}
   }
   async function refresh(){if(busy)return;await checkHealth();const refs=await api(`/api/projects/${state.project}/characters`);let ready=0,internal=null;
-    for(const ref of refs){const card=cards.get(ref.id)||create(ref);card.ref=ref;card.keyLabel.hidden=refs.filter(r=>r.name===ref.name).length<2;internal=ref.page?.project_id||internal;if(ref.selection)ready++;card.sketch.src=`/api/assets/${ref.sketch}`;
+    for(const ref of refs){const card=cards.get(ref.id)||create(ref);card.ref=ref;card.title.textContent=ref.name;if(!card.identityDirty){card.nameInput.value=ref.name;card.heightInput.value=ref.height_cm??'';}card.keyLabel.hidden=refs.filter(r=>r.name===ref.name).length<2;internal=ref.page?.project_id||internal;if(ref.selection)ready++;card.sketch.src=`/api/assets/${ref.sketch}`;
       if(!card.dirty&&document.activeElement!==card.prompt){card.prompt.value=ref.page?.draft.page_prompt||'';card.displayVersion=ref.page?.version??null;card.displayRevision=ref.revision;}
       const previous=card.select.value;card.select.replaceChildren();for(const c of ref.page?.candidates||[]){if(c.availability!=='available')continue;const o=node('option',`テイク${c.sequence}・候補${c.candidate_index}${ref.selection?.candidate_id===c.id?'（採用）':''}`);o.value=c.id;card.select.append(o);}
       if(card.round!==ref.page?.latest_round_id){const latest=ref.page?.candidates.find(c=>c.round_id===ref.page.latest_round_id&&c.availability==='available');card.select.value=latest?.id||ref.selection?.candidate_id||card.select.value;}else if(Array.from(card.select.options).some(o=>o.value===previous))card.select.value=previous;
@@ -345,7 +361,7 @@ async function charactersScreen() {
     $('character-batches').replaceChildren();$('character-recovery').hidden=true;
     if(internal){const progress=await api(`/api/projects/${internal}/progress`);for(const batch of progress.batches){const blocked=batch.paused||batch.waiting&&batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro>batch.cap_micro;if(!blocked)continue;$('character-recovery').hidden=false;const row=node('div',undefined,'diagnostic');row.append(node('p',batch.paused?'人物の生成開始を一時停止しています。':'再試行に必要な送信枠が不足しています。'));const b=node('button',batch.paused?'待機中の生成を再開':`待機中の${batch.waiting}件を生成する`,'secondary');b.addEventListener('click',command(null,()=>batch.paused?api(`/api/batches/${batch.id}/pause`,'POST',{paused:false}):api(`/api/batches/${batch.id}/budget`,'PATCH',{expected_cap:batch.cap_micro,new_cap:batch.spent_reserved_micro+batch.waiting*batch.unit_reserve_micro})));row.append(b);$('character-batches').append(row);}for(const chunk of progress.chunks){$('character-recovery').hidden=false;const row=node('div',undefined,'diagnostic');row.append(node('p',chunk.state==='unknown'?'APIの受理・完了状況が不明です。':'生成または画像取得に失敗しました。'));const actions=chunk.state==='unknown'?['reconcile','resend']:chunk.remote_name?['refetch']:[];for(const kind of actions){const b=node('button',{reconcile:'生成結果を再確認',resend:'重複の可能性を承知して再送',refetch:'生成済み画像を再取得'}[kind],'secondary');b.addEventListener('click',command(null,async()=>{if(kind==='resend'&&!confirm('既に生成済みの可能性があり、再送すると重複課金される場合があります。再送しますか？'))return;await operation('resolve:'+chunk.id,async()=>({url:`/api/chunks/${chunk.id}/resolve`,body:{action:kind,expected_state:chunk.state,explicit_duplicate_risk:kind==='resend'}}));}));row.append(b);}$('character-batches').append(row);}}
   }
-  window.addEventListener('beforeunload',event=>{if(Array.from(cards.values()).some(c=>c.dirty)){event.preventDefault();event.returnValue='';}});
+  window.addEventListener('beforeunload',event=>{if(Array.from(cards.values()).some(c=>c.dirty||c.identityDirty)){event.preventDefault();event.returnValue='';}});
   document.querySelector(`a[href="/projects/${state.project}"]`).addEventListener('click',async event=>{event.preventDefault();if(busy)return;busy=true;try{for(const card of cards.values())await save(card);location.href=`/projects/${state.project}`;}catch(e){notice(e.message);}finally{busy=false;}});
   action('generate-characters',async()=>{busy=true;try{for(const card of cards.values())await save(card);await operation('character-generate:'+state.project,async()=>({url:`/api/projects/${state.project}/characters/generate`,body:{}}));notice('対象の人物をまとめて生成依頼しました。');}finally{busy=false;await refresh();}});
   await refresh();return refresh;

@@ -9,8 +9,10 @@ from .models import Draft
 from .projects import references
 from .providers.gemini import MODEL, SUPPORTED_MODELS
 
-TEMPLATE_VERSION = "author-original-v2-page-notes"
+TEMPLATE_VERSION = "author-original-v3-work-neutral-default"
 RULES = files("manga_drawing").joinpath("prompt_templates/comic-original.txt").read_text().rstrip("\n")
+DEFAULT_TEMPLATE = files("manga_drawing").joinpath("prompt_templates/comic-default.txt").read_text()
+DEFAULT_DIMENSIONS = {"width": 1410, "height": 1920}
 SCENARIOS = {
     "success",
     "delay",
@@ -25,6 +27,22 @@ SCENARIOS = {
     "text_only",
     "multiple",
 }
+
+
+def default_prompt(settings, refs):
+    names = "、".join(
+        f"「{ref['metadata']['name']}」"
+        for ref in sorted(refs, key=lambda ref: ref["stable_key"])
+        if ref["kind"] == "character"
+    )
+    size = DEFAULT_DIMENSIONS | settings
+    return "\n".join(
+        line.replace("{height}", str(size["height"]))
+        .replace("{width}", str(size["width"]))
+        .replace("{character_names}", names)
+        for line in DEFAULT_TEMPLATE.splitlines()
+        if names or "{character_names}" not in line
+    )
 
 
 def provider_ready(cfg, settings):
@@ -43,8 +61,7 @@ def snapshot(cfg, db, page, overrides=None):
         {
             "provider": cfg.provider,
             "model": "mock-batch-v1" if cfg.provider == "mock" else MODEL,
-            "width": 1410,
-            "height": 1920,
+            **DEFAULT_DIMENSIONS,
             "scenario": "success",
         }
         | json.loads(project[0])
@@ -102,7 +119,10 @@ def snapshot(cfg, db, page, overrides=None):
     directions = "\n".join(
         f"{x['marker']} {x['text']}" for x in sorted(draft["directions"], key=lambda d: d["marker"])
     )
-    sections = [draft["base_prompt"] if draft["base_prompt"] is not None else RULES]
+    base = draft["base_prompt"]
+    if base is None and draft["prompt_override"] is None:
+        base = default_prompt(settings, selected)
+    sections = [base or ""]
     if draft["page_prompt"]:
         sections.append("このページの作画指示\n" + draft["page_prompt"])
     if directions:

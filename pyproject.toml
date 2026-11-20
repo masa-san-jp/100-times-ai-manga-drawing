@@ -1,7 +1,7 @@
 [project]
 name = "manga-drawing"
 version = "0.1.0"
-description = "Local manga draft batch pipeline with a persistent mock provider"
+description = "Local app that batch-generates manga drafts from sketches, storyboards and instruction sheets with the Gemini Batch API"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

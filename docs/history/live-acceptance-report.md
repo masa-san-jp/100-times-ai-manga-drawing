@@ -26,7 +26,7 @@
 
 ページ2の最終hash: `efced1c93825cc77f1677b6d8b9bb4af612f61402ff75822ffdaa42d86662270`。
 
-秘密情報を除いた実応答schemaは[fixture](fixtures/gemini-live-response.json)。画像base64、思考署名、応答IDは省略した。実応答はJPEGを含み、PNGに限定しないこともオフライン回帰試験にした。
+秘密情報を除いた実応答schemaは[fixture](../fixtures/gemini-live-response.json)。画像base64、思考署名、応答IDは省略した。実応答はJPEGを含み、PNGに限定しないこともオフライン回帰試験にした。
 
 ローカルの完全記録は`artifacts/live-acceptance.json`、生成物と出力フォルダーは`.data/live-acceptance/`。APIキーと完全な応答ファイルはGitに含めない。
 
@@ -38,7 +38,7 @@
 
 支払い設定前に拒否された3要求は未受理の証拠に基づき返却し、失敗履歴と監査記録を保持した。今回の成功3要求は予約を保持し、成否不明の要求を無条件に返却する実装にはしていない。
 
-[運用手順](operations.md)、[独立レビュー](gemini-review.md)を参照。
+[運用手順](../operations.md)、[独立レビュー](gemini-review.md)を参照。
 
 最終検証はChromiumを含む全103試験成功、ruff check/format成功。旧ZIP時点の実DB・出力はAIエージェント2体による内部確認を実施した（人間レビューではない）。生成画像は実APIでの3要求成功、作者の品質採否はpendingとして記録した。
 

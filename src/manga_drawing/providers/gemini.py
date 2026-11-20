@@ -18,6 +18,20 @@ SUPPORTED_MODELS = {MODEL, "gemini-3.1-flash-image", "gemini-3-pro-image"}
 TERMINAL = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"}
 
 
+def aspect_ratio(snapshot):
+    from ..prompts import TEMPLATE_VERSION
+
+    if snapshot.get("template_version") != TEMPLATE_VERSION:
+        return "3:4"
+    settings = snapshot["settings"]
+    ratios = [(1, 1), (2, 3), (3, 2), (3, 4), (4, 3), (4, 5), (5, 4), (9, 16), (16, 9), (21, 9)]
+    if settings["model"] in {MODEL, "gemini-3.1-flash-image"}:
+        ratios.extend([(1, 4), (4, 1), (1, 8), (8, 1)])
+    requested = settings["width"] / settings["height"]
+    width, height = min(ratios, key=lambda ratio: abs(ratio[0] / ratio[1] - requested))
+    return f"{width}:{height}"
+
+
 class ProviderNotConfigured(DomainError):
     def __init__(self):
         super().__init__(
@@ -92,15 +106,6 @@ class GeminiProvider:
         else:
             self.client = client
 
-    def validate(self, profile, snapshots):
-        return {
-            "valid": profile in SUPPORTED_MODELS
-            and all(
-                s["settings"]["provider"] == "gemini" and s["settings"]["model"] == profile for s in snapshots
-            ),
-            "count": len(snapshots),
-        }
-
     def build_jsonl(self, path, requests):
         """One REST GenerateContentRequest per line, carrying real immutable image bytes."""
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,7 +151,7 @@ class GeminiProvider:
                             "responseModalities": ["TEXT", "IMAGE"],
                             "candidateCount": 1,
                             "maxOutputTokens": 32768 if snap["settings"]["model"] == MODEL else 8192,
-                            "imageConfig": {"aspectRatio": "3:4", "imageSize": "2K"},
+                            "imageConfig": {"aspectRatio": aspect_ratio(snap), "imageSize": "2K"},
                         },
                     }
                     if snap.get("system_prompt"):
@@ -288,7 +293,3 @@ class GeminiProvider:
             if blob and blob.get("mimeType", blob.get("mime_type")) in ("image/png", "image/jpeg"):
                 images.append(blob.get("data", ""))
         return result | {"images": images}
-
-
-def create(cfg, client=None):
-    return GeminiProvider(cfg, client=client)

@@ -48,8 +48,8 @@ uv run python scripts/benchmark.py
 ## 実APIの仕様・検証記録
 
 - [API契約とモデル](provider-contract.md)
-- [Gemini接続の実装・検証経緯](gemini-acceptance.md)
-- [過去の少数ページによる実API検証結果](live-acceptance-report.md)
-- [キャラクターリファレンス工程の検証](character-reference-acceptance.md)
+- [Gemini接続の実装・検証経緯](history/gemini-acceptance.md)
+- [過去の少数ページによる実API検証結果](history/live-acceptance-report.md)
+- [キャラクターリファレンス工程の検証](history/character-reference-acceptance.md)
 
 実API用の起動・設定方法は[利用手順](operations.md#設定場所と確認)に集約しています。これらの過去の記録は、現在の設定や採用状態を変更するための手順ではありません。

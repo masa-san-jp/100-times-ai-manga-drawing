@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 
@@ -266,9 +267,18 @@ def test_folder_export_open_button_and_reloaded_history(cfg, client, tmp_path, c
     monkeypatch.setattr(outputs.subprocess, "run", lambda args, **kwargs: opened.append(args))
     assert client.post(result["open_url"]).status_code == 200
     assert opened[0][-1] == str(folder)  # Fixed argument vector, never a shell command.
-    assert client.get(f"/api/exports/{eid}/download").status_code == 409
+    assert client.get(f"/api/exports/{eid}/download").status_code == 404
     html = client.get(f"/projects/{pid}").text
     assert f'data-export-id="{eid}"' in html and "ZIP" not in html
+    assert "/api/exports/{eid}/download" not in client.get("/openapi.json").json()["paths"]
+    with transaction(cfg) as db:
+        db.execute("UPDATE exports SET archive_path='exports/legacy.zip' WHERE id=?", (eid,))
+    legacy = client.get(f"/api/exports/{eid}")
+    assert legacy.status_code == 200
+    assert legacy.json()["data"]["open_url"] is None
+    listing = client.get(f"/projects/{pid}")
+    assert listing.status_code == 200
+    assert f'data-export-id="{eid}"' not in listing.text
 
 
 def test_failed_folder_export_does_not_publish_partial_pages(cfg, tmp_path, clock, monkeypatch):
@@ -373,7 +383,8 @@ def test_export_is_inside_configured_work_folder(cfg, client, tmp_path, clock):
         assert get(db, "exports", eid)["state"] == "complete"
 
 
-def test_rejected_candidates_are_named_and_restored_without_loss(cfg, tmp_path, clock):
+@pytest.mark.parametrize("add_episode", [False, True])
+def test_rejected_candidates_are_named_and_restored_without_loss(cfg, tmp_path, clock, add_episode):
     from manga_drawing.export import sync_rejected
 
     pid, _ = make_project(cfg, tmp_path, 1)
@@ -400,6 +411,23 @@ def test_rejected_candidates_are_named_and_restored_without_loss(cfg, tmp_path, 
     path = work / "却下した候補" / "0001_テイク01.png"
     assert path.is_file()
     assert "人物の向き" in (path.parent / "候補一覧.csv").read_text(encoding="utf-8-sig")
+    if add_episode:
+        second, _ = make_project(cfg, tmp_path, 1)
+        old_path = path
+        old_index = path.parent / "候補一覧.csv"
+        old_index.write_text("利用者の追記")
+        extra = path.parent / "利用者の資料.txt"
+        extra.write_text("保存する資料")
+        with transaction(cfg) as db:
+            db.execute("UPDATE projects SET work_id=?,title=? WHERE id=?", (pid, "第2話", second))
+            title = get(db, "projects", pid)["title"]
+        sync_rejected(cfg)
+        path = work / title / "却下した候補" / path.name
+        assert path.is_file()
+        assert "人物の向き" in (path.parent / "候補一覧.csv").read_text(encoding="utf-8-sig")
+        assert not old_path.exists()
+        assert old_index.read_text() == "利用者の追記"
+        assert extra.read_text() == "保存する資料"
     sync_rejected(cfg)
     with connect(cfg) as db:
         item = get(db, "pages", item["id"])
@@ -432,7 +460,17 @@ def test_managed_work_folder_restore_uses_new_machine_path(cfg, tmp_path, clock)
     process_export(cfg)
     location = backup(cfg, tmp_path / "移行用バックアップ")
     restored = Config(tmp_path / "別のマシン")
+    restored.root.mkdir()
+    broken = tmp_path / "broken-backup"
+    broken.mkdir()
+    (broken / "backup.json").write_text('{"schema": 1}')
+    (broken / "db.sqlite3").write_text("not a database")
+    with pytest.raises(sqlite3.DatabaseError):
+        restore(restored, broken)
+    assert list(restored.root.iterdir()) == []
     restore(restored, location)
+    with pytest.raises(DomainError, match="復元先は空"):
+        restore(restored, location)
     initialize(restored)
     with connect(restored) as db:
         new_folder = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{pid}",)).fetchone()[0]
@@ -460,3 +498,119 @@ def test_saving_settings_keeps_managed_folder(cfg, client, tmp_path):
     )
     assert reset.status_code == 200
     assert reset.json()["data"]["work_folder"] == folder
+
+
+def test_connect_closes_connection(cfg):
+    with connect(cfg) as db:
+        assert db.execute("SELECT 1").fetchone()[0] == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        db.execute("SELECT 1")
+
+
+def test_maintenance_import_does_not_load_web():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import manga_drawing.maintenance; "
+            "assert not {'fastapi', 'manga_drawing.web'} & sys.modules.keys()",
+        ],
+        check=True,
+    )
+
+
+def test_idle_worker_starts_no_write_transactions_and_skips_reference_files(
+    cfg, tmp_path, clock, monkeypatch
+):
+    import sqlite3
+
+    from manga_drawing import character_references as characters
+
+    pid, _ = make_project(cfg, tmp_path, 1, ready_references=False)
+    characters.generate(cfg, pid, {}, "idle-test")
+    worker = Worker(cfg, clock)
+    worker.tick()
+    worker.tick()
+    original_connect = sqlite3.connect
+    statements = []
+
+    def trace(*args, **kwargs):
+        db = original_connect(*args, **kwargs)
+        db.set_trace_callback(statements.append)
+        return db
+
+    def fail_file_write(*args, **kwargs):
+        pytest.fail("unchanged reference files must be skipped")
+
+    monkeypatch.setattr(sqlite3, "connect", trace)
+    monkeypatch.setattr(characters, "atomic_write", fail_file_write)
+    assert not worker.tick()
+    assert statements and not any(sql.startswith("BEGIN") for sql in statements)
+    monkeypatch.undo()
+
+    with connect(cfg) as db:
+        ref = characters.list_references(db, pid)[0]
+        folder = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{pid}",)).fetchone()[0]
+    from pathlib import Path
+
+    index = Path(folder) / "キャラクターリファレンス/a/候補一覧.json"
+    assert json.loads(index.read_text())[0]["status"] == "未採用"
+    page = ref["page"]
+    planning.review(
+        cfg,
+        page["id"],
+        {
+            "expected_version": page["version"],
+            "latest_round_id": page["latest_round_id"],
+            "decision": "accept",
+            "candidate_id": page["candidates"][0]["id"],
+        },
+    )
+    worker.tick()
+    assert json.loads(index.read_text())[0]["status"] == "採用"
+
+
+def test_restore_partial_copy_failure_keeps_destination_empty(cfg, tmp_path, monkeypatch):
+    from manga_drawing import export
+
+    source = backup(cfg, tmp_path / "backup")
+    destination = Config(tmp_path / "restored")
+    destination.root.mkdir()
+
+    def interrupted_copy(source, target):
+        target.mkdir()
+        (target / "partial").write_text("partial restore")
+        raise OSError("copy interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(export.shutil, "copytree", interrupted_copy)
+        with pytest.raises(OSError, match="copy interrupted"):
+            restore(destination, source)
+    assert list(destination.root.iterdir()) == []
+    assert not list(tmp_path.glob(".manga-restore-*"))
+    restore(destination, source)
+    assert (destination.root / "db.sqlite3").is_file()
+
+
+def test_asset_urls_follow_contents_and_api_uses_package_version(cfg, monkeypatch):
+    import hashlib
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from manga_drawing import __version__, web
+
+    def render():
+        with TestClient(web.create_app(cfg), base_url="http://127.0.0.1") as client:
+            assert client.get("/openapi.json").json()["info"]["version"] == __version__
+            return client.get("/").text
+
+    script_path = Path(web.__file__).parent / "static/app.js"
+    original = script_path.read_bytes()
+    first_hash = hashlib.sha256(original).hexdigest()[:12]
+    assert f"app.js?v={first_hash}" in render()
+    replacement = original + b"\n"
+    read_bytes = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda p: replacement if p == script_path else read_bytes(p))
+    changed_hash = hashlib.sha256(replacement).hexdigest()[:12]
+    assert f"app.js?v={changed_hash}" in render()

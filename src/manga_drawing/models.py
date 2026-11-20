@@ -49,6 +49,7 @@ class PageInput(Strict):
 class Manifest(Strict):
     schema_version: Literal[1]
     title: str = Field(min_length=1, max_length=200)
+    base_prompt: str | None = Field(default=None, min_length=1, max_length=20000)
     characters: list[Character] = Field(default_factory=list)
     scenes: list[Scene] = Field(default_factory=list)
     pages: list[PageInput] = Field(min_length=1, max_length=500)

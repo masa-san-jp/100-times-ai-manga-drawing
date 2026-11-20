@@ -37,6 +37,20 @@ def budget_from_env(env):
     return amount
 
 
+def request_limit_from_env(env):
+    value = (env.get("MANGA_LIVE_MAX_REQUESTS") or "").strip()
+    if not value:
+        return None
+    message = "MANGA_LIVE_MAX_REQUESTSは1以上の整数か空欄にしてください。"
+    try:
+        limit = int(value)
+    except ValueError:
+        raise ValueError(message) from None
+    if limit < 1:
+        raise ValueError(message)
+    return limit
+
+
 @dataclass(frozen=True)
 class Config:
     root: Path
@@ -50,11 +64,16 @@ class Config:
     gemini_api_key: str = field(default="", repr=False, compare=False)
     live_request_limit: int | None = None
     live_unit_micro: int = 0
+    env_path: Path | None = None
+    uses_default_root: bool = False
+    idle_interval: float = 2.0
+    reference_font: str | None = None
 
     @classmethod
     def from_env(cls):
         # Read only the explicit working directory, never search parents or mutate process env.
-        env = dotenv_values(Path.cwd() / ".env", interpolate=False) | dict(os.environ)
+        env_path = Path.cwd() / ".env"
+        env = dotenv_values(env_path, interpolate=False) | dict(os.environ)
         selected_provider = env.get("MANGA_PROVIDER") or "gemini"
         base = Path.home() / ("Library/Application Support" if sys.platform == "darwin" else ".local/share")
         return cls(
@@ -62,10 +81,12 @@ class Config:
             provider=selected_provider,
             enable_live=env.get("MANGA_ENABLE_LIVE") == "1",
             gemini_api_key=env.get("GEMINI_API_KEY") or "",
-            live_request_limit=int(env["MANGA_LIVE_MAX_REQUESTS"])
-            if env.get("MANGA_LIVE_MAX_REQUESTS")
-            else None,
+            live_request_limit=request_limit_from_env(env),
             live_unit_micro=budget_from_env(env),
+            env_path=env_path if env_path.is_file() else None,
+            uses_default_root=not env.get("MANGA_DATA_DIR"),
+            idle_interval=float(env.get("MANGA_IDLE_INTERVAL") or "2"),
+            reference_font=env.get("MANGA_REFERENCE_FONT") or None,
             poll_interval=60.0 if selected_provider == "gemini" else 1.0,
         )
 

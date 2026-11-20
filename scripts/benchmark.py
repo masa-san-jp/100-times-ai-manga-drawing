@@ -3,14 +3,19 @@
 import json
 from pathlib import Path
 import resource
+import sqlite3
 import sys
 import tempfile
 import time
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
 
 from manga_drawing import character_references, planning, projects
 from manga_drawing.cli import example
 from manga_drawing.config import Config
 from manga_drawing.db import connect, initialize, transaction
+from manga_drawing.web import create_app
 from manga_drawing.worker import Worker
 
 
@@ -32,6 +37,35 @@ def adopt_example_reference(cfg, pid, worker):
             "restore": True,
         },
     )
+
+
+def measure_endpoints(cfg, pid):
+    original_connect = sqlite3.connect
+    statements = []
+
+    def traced_connect(*args, **kwargs):
+        db = original_connect(*args, **kwargs)
+        db.set_trace_callback(statements.append)
+        return db
+
+    results = {}
+    with TestClient(create_app(cfg), base_url="http://127.0.0.1") as client:
+        with patch.object(sqlite3, "connect", traced_connect):
+            for name, endpoint in (
+                ("progress", "progress"),
+                ("first_page", "pages?limit=40"),
+                ("empty_filter", "pages?status=rejected"),
+            ):
+                statements.clear()
+                started = time.perf_counter()
+                response = client.get(f"/api/projects/{pid}/{endpoint}")
+                assert response.status_code == 200, response.text
+                results[name] = {
+                    "sql_count": len(statements),
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+                assert len(statements) <= 20, results[name]
+    return results
 
 
 def main():
@@ -66,9 +100,11 @@ def main():
                 (pid,),
             ).fetchone()[0]
             first = projects.page_list(db, pid)
+        api = measure_endpoints(cfg, pid)
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         rss_bytes = rss if sys.platform == "darwin" else rss * 1024
         result = {
+            "api": api,
             "pages": 300,
             "jobs": 900,
             "succeeded": succeeded,

@@ -126,3 +126,21 @@ def test_explicit_base_import_replaces_legacy_override(cfg, tmp_path):
         row = dict(db.execute("SELECT * FROM pages WHERE project_id=?", (pid,)).fetchone())
         sent = snapshot(cfg, db, row)[0]["prompt"]
         assert sent.startswith("NEW\n\n") and "USER NOTE" in sent and "OLD" not in sent
+
+
+def test_default_prompt_changes_only_dimensions_and_character_line():
+    from manga_drawing.prompts import DEFAULT_TEMPLATE, default_prompt
+
+    original = RULES.splitlines()
+    template = DEFAULT_TEMPLATE.splitlines()
+    assert len(original) == len(template)
+    assert [line for i, line in enumerate(original) if i not in (2, 12)] == [
+        line for i, line in enumerate(template) if i not in (2, 12)
+    ]
+    ref = {"kind": "character", "stable_key": "a", "metadata": {"name": "A{width}"}}
+    settings = {"width": 1000, "height": 1500}
+    prompt = default_prompt(settings, [ref])
+    assert "縦1500px、横1000px" in prompt
+    assert "「A{width}」" in prompt
+    assert all(name not in prompt for name in ("Haruna", "Chinatsu", "Akihiko", "Tohma"))
+    assert "それぞれの名前のキャラクターデザインシートと対応している" not in default_prompt(settings, [])

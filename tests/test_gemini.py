@@ -158,10 +158,12 @@ def test_offline_sdk_protocol_and_full_pipeline(live, tmp_path, clock):
         assert provider.describe("batches/job-0")["model"] == MODEL
         request = json.loads(next(iter(fake.inputs.values())).splitlines()[0])
         assert "snapshot" not in request
-        from manga_drawing.prompts import RULES
 
         assert "systemInstruction" not in request["request"]
-        assert request["request"]["contents"][0]["parts"][0]["text"].startswith(RULES + "\n\n演出\n")
+        prompt = request["request"]["contents"][0]["parts"][0]["text"]
+        assert "縦1920px、横1410px" in prompt
+        assert "Haruna" not in prompt
+        assert "\n\n演出\n" in prompt
         assert request["request"]["generation_config"]["maxOutputTokens"] == 32768
         assert request["request"]["generation_config"]["imageConfig"] == {
             "aspectRatio": "3:4",
@@ -569,3 +571,16 @@ def test_current_and_legacy_models_complete_batch(live, tmp_path, clock, model):
     assert fake.creates[0][0] == model
     with connect(cfg) as db:
         assert db.execute("SELECT state FROM jobs").fetchone()[0] == "succeeded"
+
+
+def test_batch_provider_contract_matches_both_implementations():
+    from manga_drawing.providers.base import BatchProvider
+    from manga_drawing.providers.mock import MockProvider
+
+    methods = {
+        name for name, value in vars(BatchProvider).items() if not name.startswith("_") and callable(value)
+    }
+    assert "describe" in methods
+    for provider in (GeminiProvider, MockProvider):
+        assert methods <= set(dir(provider))
+        assert not hasattr(provider, "validate")

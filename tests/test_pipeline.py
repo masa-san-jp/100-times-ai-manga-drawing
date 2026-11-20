@@ -61,7 +61,7 @@ def test_plan_cas_and_snapshot(cfg, tmp_path, clock):
         snap3, _, _ = snapshot(cfg, db, page)
         assert snap3["prompt"] == "EXACT OVERRIDE"
         assert "system_prompt" not in snap3 and "system_prompt" not in snap1
-        assert snap3["template_version"] == "author-original-v2-page-notes"
+        assert snap3["template_version"] == "author-original-v3-work-neutral-default"
         assert snap3["attachments"] == snap1["attachments"] == snap2["attachments"]
 
 
@@ -376,11 +376,72 @@ def test_system_prompt_is_frozen_and_visible_in_history(cfg, tmp_path, monkeypat
     pid, _ = make_project(cfg, tmp_path, 1)
     start(cfg, pid)
     item = page_rows(cfg, pid)[0]
-    saved = prompts.RULES
-    monkeypatch.setattr(prompts, "RULES", "UPDATED COMMON RULES")
+    with connect(cfg) as db:
+        saved = projects.page_detail(db, item["id"])["base_prompt"]
+    monkeypatch.setattr(prompts, "DEFAULT_TEMPLATE", "UPDATED COMMON RULES")
     with TestClient(create_app(cfg), base_url="http://127.0.0.1") as client:
         history = client.get(f"/api/pages/{item['id']}/history").json()["data"]
         assert history[0]["snapshot"]["prompt"].startswith(saved + "\n\n演出\n")
         preview = client.get(f"/api/pages/{item['id']}/prompt").json()["data"]
         assert preview["prompt"].startswith("UPDATED COMMON RULES\n\n演出\n")
         assert preview["system_prompt"] == ""
+
+
+def test_bulk_page_states_match_detail_and_keep_query_count_constant(cfg, tmp_path, clock):
+    from conftest import run
+
+    pid, _ = make_project(cfg, tmp_path, 7)
+    start(cfg, pid, candidate_count=3)
+    run(cfg, clock)
+    with transaction(cfg) as db:
+        pages = page_rows(cfg, pid)
+        for page in pages[:4]:
+            db.execute(
+                "UPDATE candidates SET availability='unavailable' WHERE job_id IN "
+                "(SELECT id FROM jobs WHERE round_id=?)",
+                (page["latest_round_id"],),
+            )
+        db.execute("UPDATE pages SET latest_round_id=NULL WHERE id=?", (pages[0]["id"],))
+        for page, state in zip(pages[1:4], ("retry_wait", "unknown", "failed")):
+            db.execute("UPDATE jobs SET state=? WHERE round_id=?", (state, page["latest_round_id"]))
+        db.execute(
+            "UPDATE jobs SET state='failed' WHERE round_id=? AND candidate_index=2",
+            (pages[4]["latest_round_id"],),
+        )
+        db.execute("UPDATE rounds SET review_state='rejected' WHERE id=?", (pages[5]["latest_round_id"],))
+        accepted = projects.page_detail(db, pages[6]["id"])["candidates"][0]["id"]
+        db.execute("UPDATE pages SET accepted_candidate_id=? WHERE id=?", (accepted, pages[6]["id"]))
+        db.execute("UPDATE batches SET paused=1 WHERE project_id=?", (pid,))
+    with connect(cfg) as db:
+        details = [projects.page_detail(db, row["id"]) for row in pages]
+        assert {row["status"] for row in details} == {
+            "new",
+            "running",
+            "unknown",
+            "error",
+            "review",
+            "rejected",
+            "accepted",
+        }
+        statements = []
+        db.set_trace_callback(statements.append)
+        items = projects.page_list(db, pid)["items"]
+        assert len(statements) <= 4
+        assert len(items) == len(details)
+        for item, detail in zip(items, details):
+            for key in ("status", "generation_counts", "generation_sequence", "generation_label"):
+                assert item[key] == detail[key]
+        statements.clear()
+        assert projects.page_list(db, pid, status="invalid")["items"] == []
+        assert len(statements) <= 3
+
+    counts = []
+    for size in (30, 300):
+        project_id, _ = make_project(cfg, tmp_path, size)
+        with connect(cfg) as db:
+            statements = []
+            db.set_trace_callback(statements.append)
+            result = projects.page_list(db, project_id)
+            assert len(result["items"]) == min(size, 40)
+            counts.append(len(statements))
+    assert counts == [4, 4]

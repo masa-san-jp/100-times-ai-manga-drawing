@@ -9,14 +9,19 @@ def summarize(db, project, counts):
     pid = project["id"]
     total = sum(counts.values())
     accepted = counts.get("accepted", 0)
-    character = db.execute(
-        """SELECT COUNT(*) total,COALESCE(SUM(CASE WHEN
-      s.source_revision_id=r.current_revision_id AND
-      (s.candidate_id IS NULL OR c.availability='available') THEN 1 ELSE 0 END),0) ready
-      FROM reference_sets r LEFT JOIN character_reference_selections s ON s.reference_id=r.id
-      LEFT JOIN candidates c ON c.id=s.candidate_id WHERE r.project_id=? AND r.kind='character'""",
+    characters = db.execute(
+        """SELECT r.stable_key, label.asset_hash IS NOT NULL
+          AND (s.candidate_id IS NULL OR c.availability='available') AS ready
+          FROM reference_sets r JOIN reference_revisions revision ON revision.id=r.current_revision_id
+          LEFT JOIN character_reference_selections s
+            ON s.reference_id=r.id AND s.source_revision_id=r.current_revision_id
+          LEFT JOIN candidates c ON c.id=s.candidate_id
+          LEFT JOIN character_reference_labels label
+            ON label.source_revision_id=r.current_revision_id AND label.asset_hash=s.asset_hash
+            AND label.original_hash=COALESCE(c.raw_asset_hash,json_extract(revision.asset_hashes_json,'$[0]'))
+          WHERE r.project_id=? AND r.kind='character'""",
         (pid,),
-    ).fetchone()
+    ).fetchall()
     active = db.execute(
         """SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id
       JOIN pages p ON p.id=r.page_id WHERE p.project_id=? AND j.state IN ('queued','running','retry_wait','unknown')""",
@@ -54,16 +59,7 @@ def summarize(db, project, counts):
         (pid,),
     ):
         required.update(json.loads(row[0]).get("characters", []))
-    available = {
-        r[0]
-        for r in db.execute(
-            """SELECT r.stable_key FROM reference_sets r
-      JOIN character_reference_selections s ON s.reference_id=r.id AND s.source_revision_id=r.current_revision_id
-      LEFT JOIN candidates c ON c.id=s.candidate_id WHERE r.project_id=? AND r.kind='character'
-      AND (s.candidate_id IS NULL OR c.availability='available')""",
-            (pid,),
-        )
-    }
+    available = {row["stable_key"] for row in characters if row["ready"]}
     missing_required = bool(required - available)
     settings = json.loads(project["settings_json"])
     current = False
@@ -178,7 +174,7 @@ def summarize(db, project, counts):
         "message": message,
         "action_label": label,
         "action_url": url,
-        "characters": {"accepted": character["ready"], "total": character["total"]},
+        "characters": {"accepted": len(available), "total": len(characters)},
         "pages": {
             "accepted": accepted,
             "total": total,

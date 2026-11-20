@@ -52,6 +52,8 @@ def upload(cfg, token, path, content):
 def validate_import(cfg, token, manifest, project_id=None):
     parsed = Manifest.model_validate(manifest)
     manifest = parsed.model_dump()
+    if "base_prompt" not in parsed.model_fields_set:
+        manifest.pop("base_prompt")
     for item, model in zip(manifest["pages"], parsed.pages):
         for field in ("prompt_override", "base_prompt"):
             if field not in model.model_fields_set:
@@ -163,13 +165,29 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                     ),
                 )
                 db.execute("UPDATE reference_sets SET current_revision_id=? WHERE id=?", (revision, rid))
+                if row and kind == "character":
+                    from .character_references import relabel_matching_candidates
+
+                    relabel_matching_candidates(cfg, db, get(db, "reference_revisions", revision))
         for page in manifest["pages"]:
             existing = db.execute(
                 "SELECT draft_json FROM pages WHERE project_id=? AND number=?", (pid, page["number"])
             ).fetchone()
+            previous = json.loads(existing[0]) if existing else {}
             page_prompt = page["page_prompt"]
             if page_prompt is None:
-                page_prompt = json.loads(existing[0]).get("page_prompt", "") if existing else ""
+                page_prompt = previous.get("page_prompt", "")
+            base_prompt = previous.get("base_prompt")
+            prompt_override = previous.get("prompt_override")
+            if "base_prompt" in page:
+                base_prompt = page["base_prompt"]
+                if base_prompt is not None:
+                    prompt_override = None
+            elif "prompt_override" not in page and "base_prompt" in manifest:
+                base_prompt = manifest["base_prompt"]
+                prompt_override = None
+            if "prompt_override" in page:
+                prompt_override = page["prompt_override"]
             draft = Draft(
                 name_hash=mapped[page["name"]],
                 instruction_hash=mapped[page["instructions"]],
@@ -177,22 +195,8 @@ def commit_import(cfg, token, expected_version=None, work_id=None):
                 scene=page["scene"],
                 directions=page["directions"],
                 page_prompt=page_prompt,
-                base_prompt=(
-                    page["base_prompt"]
-                    if "base_prompt" in page
-                    else json.loads(existing[0]).get("base_prompt")
-                    if existing
-                    else None
-                ),
-                prompt_override=(
-                    page["prompt_override"]
-                    if "prompt_override" in page
-                    else None
-                    if page.get("base_prompt") is not None
-                    else json.loads(existing[0]).get("prompt_override")
-                    if existing
-                    else None
-                ),
+                base_prompt=base_prompt,
+                prompt_override=prompt_override,
             )
             db.execute(
                 """INSERT INTO pages(id,project_id,number,draft_json) VALUES(?,?,?,?)
@@ -274,6 +278,10 @@ def generation_progress(db, page):
         LEFT JOIN chunks c ON c.id=a.chunk_id WHERE j.round_id=? ORDER BY j.candidate_index""",
         (page["latest_round_id"],),
     ).fetchall()
+    return generation_summary(rows, page["latest_round"]["sequence"] if page["latest_round"] else None)
+
+
+def generation_summary(rows, sequence):
     counts = {}
     for job in rows:
         state = job["state"]
@@ -310,16 +318,28 @@ def generation_progress(db, page):
     return {
         "generation_counts": counts,
         "generation_label": label,
-        "generation_sequence": page["latest_round"]["sequence"] if page["latest_round"] else None,
+        "generation_sequence": sequence,
     }
 
 
 def page_detail(db, page_id):
     page = get(db, "pages", page_id)
     page["draft"] = json.loads(page.pop("draft_json"))
-    from .prompts import RULES
+    from .prompts import default_prompt
 
-    page["base_prompt"] = page["draft"].get("prompt_override") or page["draft"].get("base_prompt") or RULES
+    draft = page["draft"]
+    base = draft.get("prompt_override")
+    if base is None:
+        base = draft.get("base_prompt")
+    if base is None:
+        settings = json.loads(get(db, "projects", page["project_id"])["settings_json"])
+        selected = [
+            ref
+            for ref in references(db, page["project_id"])
+            if ref["stable_key"] in draft.get("characters", [])
+        ]
+        base = default_prompt(settings, selected)
+    page["base_prompt"] = base
     page["latest_round"] = get(db, "rounds", page["latest_round_id"]) if page["latest_round_id"] else None
     if page["latest_round"]:
         page["latest_round"]["snapshot"] = json.loads(page["latest_round"].pop("snapshot_json"))
@@ -339,65 +359,107 @@ def page_detail(db, page_id):
             "SELECT * FROM jobs WHERE round_id=? ORDER BY candidate_index", (page["latest_round_id"],)
         )
     ]
-    states = {j["state"] for j in page["jobs"]}
-    if page["accepted_candidate_id"]:
-        status = "accepted"
-    elif page["latest_round"] and page["latest_round"]["review_state"] == "rejected":
-        status = "rejected"
-    elif any(
-        c["round_id"] == page["latest_round_id"] and c["availability"] == "available"
-        for c in page["candidates"]
-    ):
-        status = "review"
-    elif states & {"queued", "running", "retry_wait"}:
-        status = "running"
-    elif "unknown" in states:
-        status = "unknown"
-    elif states:
-        status = "error"
-    else:
-        status = "new"
-    page["status"] = status
+    page["status"] = page_status(
+        page["accepted_candidate_id"],
+        page["latest_round"]["review_state"] if page["latest_round"] else None,
+        any(
+            c["round_id"] == page["latest_round_id"] and c["availability"] == "available"
+            for c in page["candidates"]
+        ),
+        page["jobs"],
+    )
     page.update(generation_progress(db, page))
     return page
 
 
-def page_list(db, pid, status=None, cursor=0, limit=40):
-    # Query lightweight rows and bounded candidate metadata; never load image bytes.
-    items = []
-    for r in db.execute(
-        "SELECT id FROM pages WHERE project_id=? AND number>? ORDER BY number", (pid, cursor)
+def page_status(accepted, review_state, has_candidate, jobs):
+    states = {job["state"] for job in jobs}
+    if accepted:
+        return "accepted"
+    if review_state == "rejected":
+        return "rejected"
+    if has_candidate:
+        return "review"
+    if states & {"queued", "running", "retry_wait"}:
+        return "running"
+    if "unknown" in states:
+        return "unknown"
+    return "error" if states else "new"
+
+
+def page_states(db, pid):
+    pages = db.execute(
+        """SELECT p.id,p.number,p.version,p.latest_round_id,p.accepted_candidate_id,
+          r.sequence,r.review_state FROM pages p LEFT JOIN rounds r ON r.id=p.latest_round_id
+          WHERE p.project_id=? ORDER BY p.number""",
+        (pid,),
+    ).fetchall()
+    jobs = {}
+    for row in db.execute(
+        """SELECT p.id page_id,j.state,b.paused,c.state chunk_state FROM pages p
+          JOIN jobs j ON j.round_id=p.latest_round_id JOIN batches b ON b.id=j.batch_id
+          LEFT JOIN attempts a ON a.id=j.active_attempt_id LEFT JOIN chunks c ON c.id=a.chunk_id
+          WHERE p.project_id=? ORDER BY p.number,j.candidate_index""",
+        (pid,),
     ):
-        page = page_detail(db, r[0])
-        if status and page["status"] != status:
-            continue
-        candidate = next((c for c in page["candidates"] if c["id"] == page["accepted_candidate_id"]), None)
-        candidate = candidate or next(
-            (c for c in page["candidates"] if c["round_id"] == page["latest_round_id"]), None
-        )
-        latest_candidates = [
-            c
-            for c in page["candidates"]
-            if c["round_id"] == page["latest_round_id"] and c["availability"] == "available"
-        ]
-        items.append(
-            {
-                k: page[k]
-                for k in ("id", "number", "version", "status", "latest_round_id", "accepted_candidate_id")
-            }
+        jobs.setdefault(row["page_id"], []).append(row)
+    candidates = {}
+    for row in db.execute(
+        """SELECT p.id page_id,c.id FROM pages p JOIN jobs j ON j.round_id=p.latest_round_id
+          JOIN candidates c ON c.job_id=j.id WHERE p.project_id=? AND c.availability='available'
+          ORDER BY p.number,j.candidate_index""",
+        (pid,),
+    ):
+        candidates.setdefault(row["page_id"], []).append(row["id"])
+    result = []
+    for page in pages:
+        page_jobs = jobs.get(page["id"], [])
+        available = candidates.get(page["id"], [])
+        result.append(
+            {k: page[k] for k in ("id", "number", "version", "latest_round_id", "accepted_candidate_id")}
+            | generation_summary(page_jobs, page["sequence"])
             | {
-                "thumbnail": candidate["thumbnail_hash"] if candidate else None,
-                "preview_take": candidate["sequence"] if candidate else None,
-                "generation_counts": page["generation_counts"],
-                "generation_label": page["generation_label"],
-                "generation_sequence": page["generation_sequence"],
-                "review_candidate_id": latest_candidates[0]["id"] if len(latest_candidates) == 1 else None,
-                "reviewable": bool(latest_candidates)
-                and not any(
-                    j["state"] in ("queued", "running", "retry_wait", "unknown") for j in page["jobs"]
+                "status": page_status(
+                    page["accepted_candidate_id"], page["review_state"], available, page_jobs
                 ),
+                "review_candidate_id": available[0] if len(available) == 1 else None,
+                "reviewable": bool(available)
+                and not any(j["state"] in ("queued", "running", "retry_wait", "unknown") for j in page_jobs),
             }
         )
-        if len(items) == limit:
-            break
+    return result
+
+
+def page_list(db, pid, status=None, cursor=0, limit=40):
+    items = [
+        page
+        for page in page_states(db, pid)
+        if page["number"] > cursor and (not status or page["status"] == status)
+    ][:limit]
+    previews = {}
+    if items:
+        ids = [page["id"] for page in items]
+        placeholders = ",".join("?" for _ in ids)
+        previews = {
+            row["page_id"]: row
+            for row in db.execute(
+                f"""WITH ranked AS (
+                  SELECT p.id page_id,c.thumbnail_hash,r.sequence,j.candidate_index,
+                    c.id=p.accepted_candidate_id accepted,r.id=p.latest_round_id latest,
+                    ROW_NUMBER() OVER (PARTITION BY p.id ORDER BY r.sequence DESC,j.candidate_index) history_position
+                  FROM pages p JOIN rounds r ON r.page_id=p.id
+                  JOIN jobs j ON j.round_id=r.id JOIN candidates c ON c.job_id=j.id
+                  WHERE p.id IN ({placeholders})
+                ), previews AS (
+                  SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY page_id ORDER BY accepted DESC,sequence DESC,candidate_index
+                  ) position FROM ranked WHERE history_position<=100 AND (accepted OR latest)
+                ) SELECT page_id,thumbnail_hash,sequence FROM previews WHERE position=1""",
+                ids,
+            )
+        }
+    for item in items:
+        preview = previews.get(item["id"])
+        item["thumbnail"] = preview["thumbnail_hash"] if preview else None
+        item["preview_take"] = preview["sequence"] if preview else None
     return {"items": items, "next_cursor": items[-1]["number"] if len(items) == limit else None}

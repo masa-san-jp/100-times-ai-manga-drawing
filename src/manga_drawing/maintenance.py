@@ -12,7 +12,7 @@ from .db import connect
 
 
 def live_check(cfg):
-    """Read-only T14 readiness check; never constructs an SDK client or initializes storage."""
+    """Read-only Gemini readiness check; never constructs an SDK client or initializes storage."""
     try:
         sdk_version = version("google-genai")
     except PackageNotFoundError:
@@ -45,15 +45,11 @@ def live_check(cfg):
         "MANGA_LIVE_BUDGET_PER_IMAGE_USD": cfg.live_unit_micro > 0,
         "google-genai": sdk_version is not None,
         "database_readable": database_readable,
-        "no_existing_live_jobs": database_readable and active_jobs == 0,
-        "remaining_requests_at_least_3": database_readable
-        and (cfg.live_request_limit is None or cfg.live_request_limit - reserved >= 3),
     }
     return {
         "ready": all(checks.values()),
         "checks": checks,
         "missing": [name for name, ok in checks.items() if not ok],
-        "required_requests": 3,
         "reserved_requests": reserved,
         "existing_live_jobs": active_jobs,
         "sdk_version": sdk_version,
@@ -80,9 +76,45 @@ def cleanup_staging(cfg, now=None):
     return removed
 
 
-def doctor(cfg):
-    from .web import health
+def health(cfg):
+    with connect(cfg) as db:
+        return health_state(db, cfg)
 
+
+def health_state(db, cfg):
+    values = dict(
+        db.execute(
+            """SELECT key,value FROM system WHERE key IN (
+          'heartbeat','gemini_reserved_requests','gemini_connection_verified',
+          'rejected_sync_error','reference_sync_error'
+        )"""
+        ).fetchall()
+    )
+    reserved = int(values.get("gemini_reserved_requests", 0))
+    verified = values.get("gemini_connection_verified") == "1"
+    heartbeat = values.get("heartbeat")
+    pending = db.execute(
+        "SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id WHERE j.state IN ('queued','retry_wait') AND json_extract(r.snapshot_json,'$.settings.provider')='gemini'"
+    ).fetchone()[0]
+    return {
+        "provider": cfg.provider,
+        "live_enabled": cfg.enable_live,
+        "rejected_output_error": "rejected_sync_error" in values,
+        "reference_output_error": "reference_sync_error" in values,
+        "live_remaining_requests": max(0, cfg.live_request_limit - reserved)
+        if cfg.live_request_limit is not None
+        else None,
+        "live_queued_requests": pending,
+        "live_limit_wait": cfg.provider == "gemini"
+        and cfg.live_request_limit is not None
+        and pending > max(0, cfg.live_request_limit - reserved),
+        "real_api_connected": cfg.provider == "gemini" and verified,
+        "live_connection_verified": cfg.provider == "gemini" and verified,
+        "worker_running": bool(heartbeat and time.time() - float(heartbeat) < 30),
+    }
+
+
+def doctor(cfg):
     report = health(cfg) | {"data_dir": str(cfg.root), "issues": []}
     try:
         with tempfile.TemporaryFile(dir=cfg.root) as f:

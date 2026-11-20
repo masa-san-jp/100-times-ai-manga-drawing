@@ -1,1 +1,5 @@
-"""Local, single-user manga draft pipeline. No generation network calls in v1."""
+"""Local manga draft generation app."""
+
+from importlib.metadata import version
+
+__version__ = version("manga-drawing")

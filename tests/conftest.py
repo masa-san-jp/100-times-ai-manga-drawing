@@ -88,11 +88,15 @@ def seed_character_references(cfg, pid):
     Full reference generation and review are tested separately; no production bypass.
     """
     from manga_drawing.common import timestamp
+    from manga_drawing.character_references import label_reference
+    from manga_drawing.db import get
 
     with connect(cfg) as db:
         for ref in projects.references(db, pid):
             if ref["kind"] == "character":
+                revision = get(db, "reference_revisions", ref["current_revision_id"])
+                display_hash = label_reference(cfg, db, revision, ref["images"][0])
                 db.execute(
                     "INSERT OR REPLACE INTO character_reference_selections VALUES(?,?,?,?,?)",
-                    (ref["id"], ref["current_revision_id"], None, ref["images"][0], timestamp()),
+                    (ref["id"], ref["current_revision_id"], None, display_hash, timestamp()),
                 )
