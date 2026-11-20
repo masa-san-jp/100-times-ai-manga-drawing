@@ -25,7 +25,7 @@ Starlette TestClientのhttpx非推奨警告が1件ある。試験失敗はない
 
 ## ローカル設定の補助
 
-ユーザーの設定場所を明確にするため、cwd直下の`.env`読込と`manga live-check`を追加。`.env.example`を配布し、実際の`.env`はGitに含めない。ローカル設定検査は外部APIへ通信せず、T14の3要求を確保できるか確認する。[手順](operations.md#設定場所と確認)を参照。
+ユーザーの設定場所を明確にするため、cwd直下の`.env`読込と`manga live-check`を追加。`.env.example`を配布し、実際の`.env`はGitに含めない。ローカル設定検査は外部APIへ通信せず、T14の3要求を確保できるか確認する。[手順](../operations.md#設定場所と確認)を参照。
 
 設定導線追加後の全体再検証は69件成功（既存65件＋設定・事前確認4件、Chromium有効）。ruff check/formatも成功。実API通信はなし。
 

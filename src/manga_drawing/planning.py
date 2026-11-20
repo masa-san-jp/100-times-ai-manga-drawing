@@ -81,7 +81,7 @@ def make_plan(cfg, db, pid, request):
             snap, hash_, estimate = snapshot(cfg, db, page, request.get("settings"))
             require(estimate <= cfg.chunk_bytes, "chunk_size", "1要求がチャンク上限を超えています。", 422)
         except DomainError as e:
-            if e.code == "character_reference_required":
+            if e.code in {"character_reference_required", "character_identity"}:
                 raise
             excluded.append({"page_id": page["id"], "number": page["number"], "message": e.message})
             continue
@@ -232,7 +232,7 @@ def start(cfg, pid, plan_token, key):
         return insert_batch(db, plan, key, payload_hash)
 
 
-def review_in(db, page, request):
+def review_in(cfg, db, page, request):
     require(page["version"] == request["expected_version"])
     require(page["latest_round_id"] == request["latest_round_id"])
     require(page["latest_round_id"], "no_round", "審査する候補がありません。", 422)
@@ -282,13 +282,13 @@ def review_in(db, page, request):
     )
     from .character_references import review_in as reference_review
 
-    reference_review(db, page, request)
+    reference_review(cfg, db, page, request)
     bump(db, page)
 
 
 def review(cfg, page_id, request):
     with transaction(cfg) as db:
-        review_in(db, get(db, "pages", page_id), request)
+        review_in(cfg, db, get(db, "pages", page_id), request)
         return page_detail(db, page_id)
 
 
@@ -300,7 +300,7 @@ def revise_and_generate(cfg, page_id, request, key):
         if prior:
             return prior
         require(page["version"] == request["expected_version"])
-        review_in(db, page, request | {"decision": "reject"})
+        review_in(cfg, db, page, request | {"decision": "reject"})
         page = get(db, "pages", page_id)
         patch_draft(db, page, request.get("draft_patch", {}))
         plan = make_plan(

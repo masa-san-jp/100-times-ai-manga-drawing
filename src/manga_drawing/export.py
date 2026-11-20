@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import csv
+from dataclasses import replace
 import io
 import hashlib
 import os
@@ -11,6 +12,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
 from PIL import Image
 
@@ -202,11 +204,27 @@ def process_export(cfg):
                 )
             if temp.exists():
                 shutil.rmtree(temp)
+        return True
 
 
 def candidate_filename(number, take, candidate=1):
     suffix = f"_候補{candidate:02d}" if candidate > 1 else ""
     return f"{number:04d}_テイク{take:02d}{suffix}.png"
+
+
+def rejected_filenames(rows):
+    return {candidate_filename(row["number"], row["sequence"], row["candidate_index"]): row for row in rows}
+
+
+def rejected_index(files):
+    index = io.StringIO()
+    writer = csv.writer(index, lineterminator="\n")
+    writer.writerow(["ページ", "テイク", "候補", "却下理由", "ファイル名"])
+    for filename, row in files.items():
+        writer.writerow(
+            [row["number"], row["sequence"], row["candidate_index"], row["rejection_reason"] or "", filename]
+        )
+    return index.getvalue().encode("utf-8-sig")
 
 
 def sync_rejected(cfg):
@@ -223,11 +241,6 @@ def sync_rejected(cfg):
                 ORDER BY p.number,r.sequence,j.candidate_index""",
                 (project["id"],),
             ).fetchall()
-            stamp = canonical([dict(row) for row in rows])
-            key = f"rejected_files:{project['id']}"
-            prior = db.execute("SELECT value FROM system WHERE key=?", (key,)).fetchone()
-            if prior and prior[0] == stamp:
-                continue
             base = Path(project["work_folder"])
             siblings = db.execute(
                 "SELECT id,title FROM projects WHERE work_id=? AND purpose='comic'", (project["work_id"],)
@@ -238,14 +251,27 @@ def sync_rejected(cfg):
                     name = readable_name(project["title"], project["id"])
                 base = base / name
             target = base / "却下した候補"
-            if not rows and not target.exists():
+            rows = [dict(row) for row in rows]
+            stamp = canonical({"target": str(target), "rows": rows})
+            key = f"rejected_files:{project['id']}"
+            prior = db.execute("SELECT value FROM system WHERE key=?", (key,)).fetchone()
+            if prior and prior[0] == stamp:
+                continue
+            old = json.loads(prior[0]) if prior else {}
+            # Legacy stamps recorded rows only, with no verifiable previous path.
+            old_rows = old.get("rows", []) if isinstance(old, dict) else []
+            previous = Path(old["target"]) if isinstance(old, dict) and "target" in old else target
+            expected = rejected_filenames(rows)
+            if not rows and not target.exists() and previous == target:
                 db.execute("INSERT OR REPLACE INTO system VALUES(?,?)", (key, stamp))
                 continue
+            require(
+                target.resolve().is_relative_to(Path(project["work_folder"]).resolve()),
+                "rejected_folder",
+                "却下候補の保存先が作品フォルダーの外を参照しています。",
+                422,
+            )
             target.mkdir(parents=True, exist_ok=True)
-            expected = {
-                candidate_filename(row["number"], row["sequence"], row["candidate_index"]): dict(row)
-                for row in rows
-            }
             for filename, row in expected.items():
                 destination = target / filename
                 if destination.is_file():
@@ -255,34 +281,35 @@ def sync_rejected(cfg):
                         archive.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(destination), str(archive))
                 atomic_write(destination, assets.path_for(cfg, db, row["asset_hash"]).read_bytes())
-            old_rows = json.loads(prior[0]) if prior else []
-            for old in old_rows:
-                filename = candidate_filename(old["number"], old["sequence"], old["candidate_index"])
-                old_file = target / filename
+            atomic_write(target / "候補一覧.csv", rejected_index(expected))
+            if (
+                previous.is_relative_to(Path(project["work_folder"]))
+                and previous.resolve() == previous.absolute()
+            ):
+                for filename, row in rejected_filenames(old_rows).items():
+                    if previous != target or filename not in expected:
+                        old_file = previous / filename
+                        if (
+                            old_file.is_file()
+                            and not old_file.is_symlink()
+                            and hashlib.sha256(old_file.read_bytes()).hexdigest() == row["asset_hash"]
+                        ):
+                            archive = (
+                                cfg.root / "exports" / "rejected-history" / project["id"] / row["asset_hash"]
+                            )
+                            archive.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(old_file), str(archive))
+                old_index = previous / "候補一覧.csv"
                 if (
-                    filename not in expected
-                    and old_file.is_file()
-                    and hashlib.sha256(old_file.read_bytes()).hexdigest() == old["asset_hash"]
+                    previous != target
+                    and old_index.is_file()
+                    and not old_index.is_symlink()
+                    and old_index.read_bytes() == rejected_index(rejected_filenames(old_rows))
                 ):
-                    archive = cfg.root / "exports" / "rejected-history" / project["id"] / old["asset_hash"]
-                    archive.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(old_file), str(archive))
-            index = io.StringIO()
-            writer = csv.writer(index, lineterminator="\n")
-            writer.writerow(["ページ", "テイク", "候補", "却下理由", "ファイル名"])
-            for filename, row in expected.items():
-                writer.writerow(
-                    [
-                        row["number"],
-                        row["sequence"],
-                        row["candidate_index"],
-                        row["rejection_reason"] or "",
-                        filename,
-                    ]
-                )
-            atomic_write(target / "候補一覧.csv", index.getvalue().encode("utf-8-sig"))
+                    old_index.unlink()
             db.execute("INSERT OR REPLACE INTO system VALUES(?,?)", (key, stamp))
-        db.execute("DELETE FROM system WHERE key='rejected_sync_error'")
+        if db.execute("SELECT 1 FROM system WHERE key='rejected_sync_error'").fetchone():
+            db.execute("DELETE FROM system WHERE key='rejected_sync_error'")
 
 
 def publication_target(manifest):
@@ -432,7 +459,8 @@ def restore(cfg, source):
     )
     require((source / "backup.json").is_file(), "backup", "完全バックアップを指定してください。", 422)
     require(
-        not cfg.root.exists() or not any(cfg.root.iterdir()),
+        not cfg.root.is_symlink()
+        and (not cfg.root.exists() or (cfg.root.is_dir() and not any(cfg.root.iterdir()))),
         "restore_exists",
         "復元先は空のフォルダーにしてください。",
         422,
@@ -443,8 +471,18 @@ def restore(cfg, source):
         "未対応のバックアップです。",
         422,
     )
-    shutil.copytree(source, cfg.root, dirs_exist_ok=True)
-    with transaction(cfg) as db:
+    cfg.root.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".manga-restore-", dir=cfg.root.parent) as staging:
+        staged = replace(cfg, root=Path(staging) / "data")
+        shutil.copytree(source, staged.root)
+        relocate_restored_folders(staged, cfg.root)
+        # Renaming on the same filesystem publishes the complete restore at once.
+        # The OS refuses to replace a directory that has become nonempty.
+        staged.root.rename(cfg.root)
+
+
+def relocate_restored_folders(staged, final_root):
+    with transaction(staged) as db:
         for row in db.execute(
             "SELECT key,value FROM system WHERE key LIKE 'managed_work_folder:%'"
         ).fetchall():
@@ -457,7 +495,7 @@ def restore(cfg, source):
                 422,
             )
             old = db.execute("SELECT value FROM system WHERE key=?", (f"work_folder:{work_id}",)).fetchone()
-            target = str(cfg.root / relative)
+            target = str(final_root / relative)
             db.execute("UPDATE system SET value=? WHERE key=?", (target, f"work_folder:{work_id}"))
             if old:
                 for export in db.execute("SELECT id,manifest_json FROM exports").fetchall():

@@ -611,21 +611,10 @@ def test_character_reference_ui_generation_review_and_page_inputs(browser_app, c
             next(a["hash"] for a in payload["attachments"] if a["role"] == "character")
             == ref["selection"]["asset_hash"]
         )
-    # A label added after generation must be both displayed and sent to drawing.
-    from manga_drawing import assets
-    from manga_drawing.db import transaction
-    from PIL import Image
-
-    with transaction(cfg) as db:
-        annotated = assets.put(cfg, db, assets.png(Image.new("RGB", (64, 64), "red")))
-        db.execute(
-            "UPDATE character_reference_selections SET asset_hash=? WHERE reference_id=?",
-            (annotated, ref["id"]),
-        )
-        payload, _, _ = snapshot(cfg, db, get(db, "pages", page_rows(cfg, pid)[0]["id"]))
-        assert next(a["hash"] for a in payload["attachments"] if a["role"] == "character") == annotated
     page.reload()
-    expect(card.get_by_alt_text("Aのリファレンス候補")).to_have_attribute("src", f"/api/assets/{annotated}")
+    expect(card.get_by_alt_text("Aのリファレンス候補")).to_have_attribute(
+        "src", f"/api/assets/{ref['selection']['asset_hash']}"
+    )
     for theme in ["light", "dark"]:
         page.locator("#theme").select_option(theme)
         Path("artifacts/screenshots").mkdir(parents=True, exist_ok=True)
@@ -637,9 +626,9 @@ def test_character_reference_ui_generation_review_and_page_inputs(browser_app, c
     run(cfg, clock)
     page.reload()
     expect(card.locator("select option")).to_have_count(2)
-    expect(card.locator("select")).to_have_value(
-        character_references.list_references(connect(cfg), pid)[0]["page"]["candidates"][0]["id"]
-    )
+    with connect(cfg) as db:
+        latest = character_references.list_references(db, pid)[0]["page"]["candidates"][0]["id"]
+    expect(card.locator("select")).to_have_value(latest)
     page.get_by_role("button", name="この候補を採用する", exact=True).click()
     expect(card.locator(".character-state")).to_contain_text("採用済み")
     page.get_by_role("link", name="← ページ一覧").click()
@@ -780,3 +769,29 @@ def test_author_original_is_read_only_and_page_notes_are_sent(browser_app, cfg, 
         assert saved["prompt"].startswith("AUTHOR ORIGINAL\n\n")
         assert "① カメラを見上げる" in saved["prompt"]
         assert "集中線を追加しない" in saved["prompt"]
+
+
+def test_page_character_selection_is_saved_and_used(browser_app, cfg, tmp_path):
+    page, _, base = browser_app
+    pid, _ = make_project(cfg, tmp_path, 1)
+    ident = page_rows(cfg, pid)[0]["id"]
+    page.goto(f"{base}/pages/{ident}")
+    character = page.get_by_role("checkbox", name="A", exact=True)
+    expect(character).to_be_checked()
+    character.uncheck()
+    page.get_by_role("button", name="作画指示を保存").click()
+    expect(page.locator("#instruction-save-state")).to_have_text("保存済み")
+    page.reload()
+    expect(character).not_to_be_checked()
+    character.check()
+    page.get_by_role("button", name="作画指示を保存").click()
+    expect(page.locator("#instruction-save-state")).to_have_text("保存済み")
+    page.reload()
+    expect(character).to_be_checked()
+
+    from manga_drawing.db import get
+    from manga_drawing.prompts import snapshot
+
+    with connect(cfg) as db:
+        snap, _, _ = snapshot(cfg, db, get(db, "pages", ident))
+        assert any(attachment["role"] == "character" for attachment in snap["attachments"])

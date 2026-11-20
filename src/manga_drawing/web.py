@@ -5,7 +5,6 @@ import hmac
 import json
 from pathlib import Path
 import secrets
-import time
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -16,10 +15,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import Field
 
-from . import assets, character_references, planning, projects
+from . import __version__, assets, character_references, planning, projects
 from .common import DomainError, canonical, require, timestamp, uid
 from .config import Config
 from .db import connect, get, initialize, transaction
+from .maintenance import health, health_state
 from .models import Character, Scene, Strict
 from .workspaces import ensure_work_folder
 
@@ -103,49 +103,17 @@ class ExportRequest(Strict):
     expected_version: int
 
 
-def health(cfg):
-    with connect(cfg) as db:
-        heartbeat_row = db.execute("SELECT value FROM system WHERE key='heartbeat'").fetchone()
-    reserved = 0
-    verified = False
-    with connect(cfg) as db:
-        row = db.execute("SELECT value FROM system WHERE key='gemini_reserved_requests'").fetchone()
-        reserved = int(row[0]) if row else 0
-        verified_row = db.execute(
-            "SELECT value FROM system WHERE key='gemini_connection_verified'"
-        ).fetchone()
-        verified = bool(verified_row and verified_row[0] == "1")
-        rejected_error = db.execute("SELECT value FROM system WHERE key='rejected_sync_error'").fetchone()
-        reference_error = db.execute("SELECT value FROM system WHERE key='reference_sync_error'").fetchone()
-        pending = db.execute(
-            "SELECT COUNT(*) FROM jobs j JOIN rounds r ON r.id=j.round_id WHERE j.state IN ('queued','retry_wait') AND json_extract(r.snapshot_json,'$.settings.provider')='gemini'"
-        ).fetchone()[0]
-    return {
-        "provider": cfg.provider,
-        "live_enabled": cfg.enable_live,
-        "rejected_output_error": bool(rejected_error),
-        "reference_output_error": bool(reference_error),
-        "live_remaining_requests": max(0, cfg.live_request_limit - reserved)
-        if cfg.live_request_limit is not None
-        else None,
-        "live_queued_requests": pending,
-        "live_limit_wait": cfg.provider == "gemini"
-        and cfg.live_request_limit is not None
-        and pending > max(0, cfg.live_request_limit - reserved),
-        "real_api_connected": cfg.provider == "gemini" and verified,
-        "live_connection_verified": cfg.provider == "gemini" and verified,
-        "worker_running": bool(heartbeat_row and time.time() - float(heartbeat_row[0]) < 30),
-    }
-
-
 def create_app(cfg=None):
     cfg = cfg or Config.from_env()
     initialize(cfg)
-    app = FastAPI(title="100 TIMES AI MANGA DRAWING", version="0.2.0")
+    app = FastAPI(title="100 TIMES AI MANGA DRAWING", version=__version__)
     app.state.cfg = cfg
     package = Path(__file__).parent
     templates = Jinja2Templates(directory=package / "templates")
     templates.env.globals["runtime_provider"] = cfg.provider
+    for asset in ("app.css", "app.js"):
+        content = (package / "static" / asset).read_bytes()
+        templates.env.globals[asset.replace(".", "_") + "_version"] = hashlib.sha256(content).hexdigest()[:12]
     app.mount("/static", StaticFiles(directory=package / "static"), name="static")
 
     def csrf(session):
@@ -347,6 +315,7 @@ def create_app(cfg=None):
             page = projects.page_detail(db, page_id)
             project = get(db, "projects", page["project_id"])
             require(project["purpose"] == "comic", "project", "キャラクター資料画面を開いてください。", 422)
+            references = [ref for ref in projects.references(db, project["id"]) if ref["kind"] == "character"]
             previous_page = db.execute(
                 "SELECT id,number FROM pages WHERE project_id=? AND number<? ORDER BY number DESC LIMIT 1",
                 (page["project_id"], page["number"]),
@@ -361,6 +330,7 @@ def create_app(cfg=None):
             context={
                 "page": page,
                 "project": project,
+                "character_references": references,
                 "previous_page": previous_page,
                 "next_page": next_page,
             },
@@ -591,6 +561,10 @@ def create_app(cfg=None):
                 canonical(metadata) == revision["metadata_json"]
                 and canonical(images) == revision["asset_hashes_json"]
             ):
+                if ref["kind"] == "character" and character_references.relabel_matching_candidates(
+                    cfg, db, revision
+                ):
+                    db.execute("UPDATE projects SET version=version+1 WHERE id=?", (ref["project_id"],))
                 return {"data": {"revision_id": ref["current_revision_id"]}}
             ident = uid()
             db.execute(
@@ -598,6 +572,10 @@ def create_app(cfg=None):
                 (ident, rid, canonical(metadata), canonical(images), timestamp()),
             )
             db.execute("UPDATE reference_sets SET current_revision_id=? WHERE id=?", (ident, rid))
+            if ref["kind"] == "character":
+                character_references.relabel_matching_candidates(
+                    cfg, db, get(db, "reference_revisions", ident)
+                )
             db.execute("UPDATE projects SET version=version+1 WHERE id=?", (ref["project_id"],))
             return {"data": {"revision_id": ident}}
 
@@ -676,8 +654,7 @@ def create_app(cfg=None):
         with connect(cfg) as db:
             project = get(db, "projects", pid)
             counts, generation_counts = {}, {}
-            for row in db.execute("SELECT id FROM pages WHERE project_id=?", (pid,)):
-                page = projects.page_detail(db, row[0])
+            for page in projects.page_states(db, pid):
                 status = page["status"]
                 for phase, count in page["generation_counts"].items():
                     generation_counts[phase] = generation_counts.get(phase, 0) + count
@@ -704,6 +681,7 @@ def create_app(cfg=None):
                     (pid,),
                 )
             ]
+            status = health_state(db, cfg)
         return {
             "data": {
                 "counts": counts,
@@ -715,7 +693,7 @@ def create_app(cfg=None):
                 "batches": batches,
                 "chunks": chunks,
                 "project_version": project["version"],
-                **health(cfg),
+                **status,
             }
         }
 
@@ -762,16 +740,6 @@ def create_app(cfg=None):
         with connect(cfg) as db:
             row = get(db, "exports", eid)
         return {"data": {"folder_path": str(open_folder(cfg, row))}}
-
-    @app.get("/api/exports/{eid}/download")
-    def download(eid: str):
-        with connect(cfg) as db:
-            row = get(db, "exports", eid)
-        require(row["state"] == "complete", "not_ready", "書き出しが完了していません。", 409)
-        require(
-            row["archive_path"].endswith(".zip"), "folder_export", "画像フォルダーを開いてください。", 409
-        )
-        return FileResponse(cfg.root / row["archive_path"], filename="manga-pages.zip")
 
     @app.get("/api/assets/{hash_}")
     def asset(hash_: str):

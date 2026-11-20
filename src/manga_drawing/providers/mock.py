@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import closing, contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -26,10 +27,11 @@ class MockProvider:
                 CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY,operation TEXT,display_key TEXT,created REAL);
             """)
 
+    @contextmanager
     def db(self):
-        db = sqlite3.connect(self.root / "state.sqlite3")
-        db.row_factory = sqlite3.Row
-        return db
+        with closing(sqlite3.connect(self.root / "state.sqlite3")) as db, db:
+            db.row_factory = sqlite3.Row
+            yield db
 
     @staticmethod
     def hash_file(path):
@@ -152,9 +154,6 @@ class MockProvider:
                 f.write(canonical(request) + "\n")
         temp.replace(path)
         return self.hash_file(path)
-
-    def validate(self, profile, snapshots):
-        return {"valid": profile == "mock-batch-v1", "count": len(snapshots)}
 
     def call_count(self):
         with self.db() as db:

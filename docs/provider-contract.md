@@ -1,10 +1,10 @@
 # プロバイダー契約
 
-通常起動の既定はgemini。開発用のmockは明示指定する。I15でGemini接続コードとSDKを使うオフライン契約試験を追加した。実アカウントでも初回2ページ＋修正1ページのBatch送信・結果取り込み・T14機能試験が成功した。作者による品質採否は別途。[実API検証結果](live-acceptance-report.md)を参照。
+通常起動では Gemini を使用します。開発用の模擬 API は `MANGA_PROVIDER=mock` で選択します。
 
 ## ローカル契約
 
-`providers/base.py`のBatchProviderがupload、submit、find、poll、fetch、parse_lineを定義する。mockのbuild_jsonlは各行にkey（attempt ID）、page_number、candidate_index、attempt_number、snapshotを保存する。snapshotにはプロンプト全文、順序付き画像hash、資料の版、モデルと出力設定を含む。
+`providers/base.py`のBatchProviderがbuild_jsonl、upload、submit、find、describe、poll、fetch、parse_lineを定義する。mockのbuild_jsonlは各行にkey（attempt ID）、page_number、candidate_index、attempt_number、snapshotを保存する。snapshotにはプロンプト全文、順序付き画像hash、資料の版、モデルと出力設定を含む。
 
 模擬結果の各行はkeyとusage、images（base64画像のリスト）またはerrorまたはtextを持つ。1要求1画像を成功とし、結果全体を2走査してキー重複・欠落を検査してから候補を登録する。これはローカル試験用schemaで、Geminiの実応答schemaではない。
 
@@ -27,7 +27,7 @@
 
 ## Gemini接続
 
-`providers/gemini.py`はgoogle-genai 2.31.0の公開APIを使う。入力画像をinlineDataとしてJSONLに固定し、Files upload → native Batch create → poll → 結果ファイルのストリーム取得を行う。モデルは`gemini-3-pro-image`、2K・3:4・1要求1画像。モデル情報取得で提供とBatch対応を確認済み。支払い設定後、実生成3要求と結果の取り込みに成功。
+`providers/gemini.py` は google-genai を使って、入力画像を inlineData として JSONL に固定し、Files upload、Batch create、状態確認、結果のストリーム取得を行います。既定の `gemini-nano-banana-2.1` は `maxOutputTokens=32768`、対応する `gemini-3.1-flash-image` と `gemini-3-pro-image` は `8192` です。2K・1要求1画像を指定します。
 
 SDKの自動再試行は無効。429は明示拒否として待機し、送信応答喪失はunknownとして照合する。照合ゼロ件から未送信と断定しない。アップロードの事前障害は最大3回で停止する。ネットワーク待機中はDB書込ロックを保持しない。
 

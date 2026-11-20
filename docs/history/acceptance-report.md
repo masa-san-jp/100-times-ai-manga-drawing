@@ -49,7 +49,7 @@ artifacts/screenshotsへ設定画面、一覧、詳細のライト/ダーク、�
 
 ## 再実行
 
-[運用手順](operations.md)の検証コマンドを使う。Chromium試験はlocalhostへのbind権限が必要。今回の環境では `PLAYWRIGHT_BROWSERS_PATH=/private/tmp/manga-browsers` を指定した。通常の環境では `uv run playwright install chromium` の標準保存先で実行できる。
+[運用手順](../operations.md)の検証コマンドを使う。Chromium試験はlocalhostへのbind権限が必要。今回の環境では `PLAYWRIGHT_BROWSERS_PATH` で一時ディレクトリーを指定した。通常の環境では `uv run playwright install chromium` の標準保存先で実行できる。
 
 性能測定の生データはartifacts/benchmark.json、スクリーンショットはartifacts/screenshotsへ出力する。これらの生成物はGit管理せず、試験で再生成できる。
 

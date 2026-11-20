@@ -62,13 +62,23 @@ def test_reference_pipeline_gates_pages_and_uses_approved_generated_image(cfg, t
     from pathlib import Path
 
     output = Path(folder) / "キャラクターリファレンス" / ref["key"]
-    assert (output / "テイク01.png").is_file()
+    from hashlib import sha256
+
+    from PIL import Image
+
+    image_path = output / "テイク01.png"
+    assert sha256(image_path.read_bytes()).hexdigest() == generated
+    assert client.get(f"/api/assets/{generated}").content == image_path.read_bytes()
+    with Image.open(image_path) as image:
+        assert image.mode == "RGB"
+        assert any(color == (176, 0, 0) for _, color in image.getcolors(65536))
     assert json.loads((output / "候補一覧.json").read_text())[0]["status"] == "採用"
     assert (output / "テイク01_生成指示.txt").is_file()
     start(cfg, pid)
     run(cfg, clock)
     page = page_rows(cfg, pid)[0]
-    detail = projects.page_detail(connect(cfg), page["id"])
+    with connect(cfg) as db:
+        detail = projects.page_detail(db, page["id"])
     planning.review(
         cfg,
         page["id"],
@@ -81,9 +91,9 @@ def test_reference_pipeline_gates_pages_and_uses_approved_generated_image(cfg, t
     )
     from manga_drawing.export import schedule, process_export, output_folder
 
-    exported = schedule(
-        cfg, pid, {"mode": "complete", "expected_version": get(connect(cfg), "projects", pid)["version"]}
-    )
+    with connect(cfg) as db:
+        version = get(db, "projects", pid)["version"]
+    exported = schedule(cfg, pid, {"mode": "complete", "expected_version": version})
     process_export(cfg)
     with connect(cfg) as db:
         assert output_folder(cfg, get(db, "exports", exported["export_id"])) == Path(folder) / "生成結果"
@@ -159,13 +169,12 @@ def test_source_update_invalidates_reference_and_pending_page_plan(cfg, tmp_path
     assert refs(cfg, pid)[0]["selection"] is None
     with pytest.raises(DomainError):
         planning.start(cfg, pid, plan["plan_token"], "stale-page-plan")
-    with pytest.raises(DomainError, match="元資料"):
-        adopt(cfg, refs(cfg, pid)[0])
+    updated = refs(cfg, pid)[0]
+    assert updated["page"]["candidates"][0]["id"] == r["page"]["candidates"][0]["id"]
+    assert updated["page"]["candidates"][0]["asset_hash"] != r["page"]["candidates"][0]["asset_hash"]
     with pytest.raises(DomainError, match="リファレンス"):
         start(cfg, pid)
-    characters.generate(cfg, pid, {}, "new-source")
-    run(cfg, clock)
-    adopt(cfg, refs(cfg, pid)[0])
+    adopt(cfg, updated)
     start(cfg, pid)
 
 
@@ -315,7 +324,9 @@ def test_schema2_upgrade_preserves_existing_adopted_comic_data(cfg, tmp_path, cl
     pid, _ = make_project(cfg, tmp_path, 1)
     start(cfg, pid)
     run(cfg, clock)
-    p = projects.page_detail(connect(cfg), page_rows(cfg, pid)[0]["id"])
+    page_id = page_rows(cfg, pid)[0]["id"]
+    with connect(cfg) as db:
+        p = projects.page_detail(db, page_id)
     planning.review(
         cfg,
         p["id"],
@@ -331,7 +342,8 @@ def test_schema2_upgrade_preserves_existing_adopted_comic_data(cfg, tmp_path, cl
             table: [dict(r) for r in db.execute(f"SELECT * FROM {table}")]
             for table in ["pages", "rounds", "candidates", "assets", "review_events"]
         }
-        db.executescript("""DROP TABLE character_reference_selections;
+        db.executescript("""DROP TABLE character_reference_labels;
+          DROP TABLE character_reference_selections;
           DROP TABLE character_reference_tasks;
           DROP INDEX one_reference_project;
           ALTER TABLE projects DROP COLUMN parent_project_id;
@@ -340,8 +352,49 @@ def test_schema2_upgrade_preserves_existing_adopted_comic_data(cfg, tmp_path, cl
     initialize(cfg)
     initialize(cfg)
     with connect(cfg) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
         assert get(db, "projects", pid)["purpose"] == "comic"
         for table, records in before.items():
             assert [dict(r) for r in db.execute(f"SELECT * FROM {table}")] == records
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_unlabelled_candidate_and_legacy_selection_cannot_be_used(cfg, tmp_path, clock, client):
+    pid, _ = make_project(cfg, tmp_path, 1, ready_references=False)
+    ref = refs(cfg, pid)[0]
+    assert (
+        client.patch(
+            f"/api/references/{ref['id']}",
+            json={"expected_revision": ref["revision"], "metadata": {"height_cm": None}},
+        ).status_code
+        == 200
+    )
+    with pytest.raises(DomainError, match="名前と身長"):
+        characters.generate(cfg, pid, {}, "missing-height")
+    with pytest.raises(DomainError, match="名前と身長"):
+        start(cfg, pid)
+    ref = refs(cfg, pid)[0]
+    assert (
+        client.patch(
+            f"/api/references/{ref['id']}",
+            json={"expected_revision": ref["revision"], "metadata": {"height_cm": 165}},
+        ).status_code
+        == 200
+    )
+    characters.generate(cfg, pid, {}, "set-height")
+    run(cfg, clock)
+    ref = refs(cfg, pid)[0]
+    candidate = ref["page"]["candidates"][0]
+    assert candidate["identity_labelled"]
+    adopt(cfg, ref)
+    with transaction(cfg) as db:
+        db.execute(
+            "UPDATE character_reference_selections SET asset_hash=? WHERE reference_id=?",
+            (candidate["raw_asset_hash"], ref["id"]),
+        )
+        db.execute("DELETE FROM character_reference_labels WHERE source_revision_id=?", (ref["revision"],))
+    assert refs(cfg, pid)[0]["selection"] is None
+    with pytest.raises(DomainError, match="名前・身長"):
+        adopt(cfg, refs(cfg, pid)[0])
+    with pytest.raises(DomainError, match="リファレンス"):
+        start(cfg, pid)

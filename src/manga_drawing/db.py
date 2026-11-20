@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from importlib.resources import files
 import sqlite3
 
 from .common import DomainError
 
 
+@contextmanager
 def connect(cfg):
-    db = sqlite3.connect(cfg.root / "db.sqlite3", timeout=5)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=5000")
-    return db
+    with closing(sqlite3.connect(cfg.root / "db.sqlite3", timeout=5)) as db, db:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute("PRAGMA busy_timeout=5000")
+        yield db
 
 
 def initialize(cfg):
@@ -20,7 +21,7 @@ def initialize(cfg):
     with cfg.write_lock(), connect(cfg) as db:
         db.execute("PRAGMA journal_mode=WAL")
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version > 3:
+        if version > 4:
             raise DomainError("migration", "このアプリより新しいDBです。更新版を使用してください。")
         if version == 0:
             script = files("manga_drawing").joinpath("migrations/001_initial.sql").read_text()
@@ -32,6 +33,9 @@ def initialize(cfg):
         if version < 3:
             script = files("manga_drawing").joinpath("migrations/003_character_references.sql").read_text()
             db.executescript("BEGIN IMMEDIATE;\n" + script + "\nPRAGMA user_version=3;COMMIT;")
+        if version < 4:
+            script = files("manga_drawing").joinpath("migrations/004_reference_labels.sql").read_text()
+            db.executescript("BEGIN IMMEDIATE;\n" + script + "\nPRAGMA user_version=4;COMMIT;")
         from .workspaces import ensure_work_folder
 
         for work in db.execute("SELECT id FROM works").fetchall():
@@ -40,17 +44,9 @@ def initialize(cfg):
 
 @contextmanager
 def transaction(cfg):
-    with cfg.write_lock():
-        db = connect(cfg)
-        try:
-            db.execute("BEGIN IMMEDIATE")
-            yield db
-            db.commit()
-        except BaseException:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+    with cfg.write_lock(), connect(cfg) as db:
+        db.execute("BEGIN IMMEDIATE")
+        yield db
 
 
 def get(db, table, ident):

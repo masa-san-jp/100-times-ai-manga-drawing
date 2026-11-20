@@ -87,7 +87,7 @@ def test_live_check_no_client_no_storage_no_secrets(tmp_path, monkeypatch):
         live_unit_micro=123456,
     )
     report = live_check(ready)
-    assert report["ready"] and report["required_requests"] == 3
+    assert report["ready"] and "required_requests" not in report
     assert "secret-test" not in json.dumps(report)
     assert not cfg.root.exists()
 
@@ -106,13 +106,13 @@ def test_live_check_counts_existing_reservations_and_rejects_bad_database(cfg, m
         db.execute("INSERT INTO system(key,value) VALUES('gemini_reserved_requests','1')")
     report = live_check(cfg)
     assert report["reserved_requests"] == 1
-    assert not report["ready"] and "remaining_requests_at_least_3" in report["missing"]
+    assert report["ready"]
     with connect(cfg) as db:
         db.execute("UPDATE system SET value='invalid' WHERE key='gemini_reserved_requests'")
     assert "database_readable" in live_check(cfg)["missing"]
 
 
-def test_live_check_rejects_unreserved_live_queue(cfg, tmp_path, monkeypatch):
+def test_live_check_reports_unreserved_live_queue(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr("manga_drawing.maintenance.version", lambda name: "2.31.0")
     cfg = replace(
         cfg,
@@ -126,4 +126,33 @@ def test_live_check_rejects_unreserved_live_queue(cfg, tmp_path, monkeypatch):
     start(cfg, pid)
     report = live_check(cfg)
     assert report["reserved_requests"] == 0 and report["existing_live_jobs"] == 2
-    assert not report["ready"] and "no_existing_live_jobs" in report["missing"]
+    assert report["ready"]
+
+
+def test_cli_version_and_startup_diagnostics(tmp_path, monkeypatch, capsys):
+    import sys
+
+    import pytest
+
+    from manga_drawing import __version__
+    from manga_drawing.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["manga", "--version"])
+    with pytest.raises(SystemExit) as end:
+        main()
+    assert end.value.code == 0
+    assert __version__ in capsys.readouterr().out
+    (tmp_path / ".env").write_text("MANGA_PROVIDER=mock\nMANGA_DATA_DIR=local\nGEMINI_API_KEY=private-test\n")
+    monkeypatch.setattr(sys, "argv", ["manga", "init"])
+    main()
+    output = capsys.readouterr().err
+    assert str(tmp_path / "local") in output
+    assert str(tmp_path / ".env") in output
+    assert "API=mock" in output and "private-test" not in output
+    for value in ("abc", "0"):
+        monkeypatch.setenv("MANGA_LIVE_MAX_REQUESTS", value)
+        with pytest.raises(SystemExit) as end:
+            main()
+        assert end.value.code == 1
+        assert "1以上の整数か空欄" in capsys.readouterr().err

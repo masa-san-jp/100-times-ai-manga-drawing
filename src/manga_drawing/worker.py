@@ -33,13 +33,29 @@ class Worker:
         self.cfg, self.clock = cfg, clock
         self.provider = create_provider(cfg, clock)
         self.last_cleanup = 0.0
+        self.last_heartbeat = float("-inf")
+        self.heartbeat_lock = threading.Lock()
+        self.reference_stamp = None
 
     def heartbeat(self):
-        with transaction(self.cfg) as db:
-            db.execute("INSERT OR REPLACE INTO system VALUES('heartbeat',?)", (str(time.time()),))
+        with self.heartbeat_lock:
+            if time.monotonic() - self.last_heartbeat < 5:
+                return
+            with transaction(self.cfg) as db:
+                db.execute("INSERT OR REPLACE INTO system VALUES('heartbeat',?)", (str(time.time()),))
+            self.last_heartbeat = time.monotonic()
 
     def prepare(self):
         """Reserve a complete chunk atomically; insufficient allowance leaves every job queued."""
+        with connect(self.cfg) as db:
+            eligible = db.execute(
+                """SELECT 1 FROM jobs j JOIN batches b ON b.id=j.batch_id
+                WHERE b.paused=0 AND j.state IN ('queued','retry_wait') AND j.retry_after<=?
+                  AND json_extract(b.plan_json,'$.pages[0].snapshot.settings.provider')=? LIMIT 1""",
+                (self.clock(), self.cfg.provider),
+            ).fetchone()
+        if not eligible:
+            return None
         with transaction(self.cfg) as db:
             external = db.execute(
                 "SELECT COUNT(DISTINCT c.id) FROM chunks c JOIN attempts a ON a.chunk_id=c.id JOIN jobs j ON j.id=a.job_id JOIN rounds r ON r.id=j.round_id WHERE json_extract(r.snapshot_json,'$.settings.provider')=? AND (c.state IN ('submitting','submitted') OR (c.state='unknown' AND c.output_path IS NULL AND COALESCE(c.last_error,'') NOT LIKE 'gemini_batch_%'))",
@@ -374,6 +390,25 @@ class Worker:
                     continue
                 with transaction(self.cfg) as db:
                     raw_h, display, thumb = assets.candidate_assets(self.cfg, db, raw)
+                    snapshot = json.loads(get(db, "rounds", job["round_id"])["snapshot_json"])
+                    if snapshot.get("task_type") == "character_reference":
+                        from .character_references import label_reference
+
+                        source = snapshot["references"][0]
+                        revision = get(db, "reference_revisions", source["revision"])
+                        if json.loads(revision["metadata_json"]).get("height_cm") is not None:
+                            try:
+                                label_reference(self.cfg, db, revision, raw_h)
+                                ref = get(db, "reference_sets", source["id"])
+                                current_revision = get(db, "reference_revisions", ref["current_revision_id"])
+                                if (
+                                    current_revision["id"] != revision["id"]
+                                    and current_revision["asset_hashes_json"] == revision["asset_hashes_json"]
+                                ):
+                                    label_reference(self.cfg, db, current_revision, raw_h)
+                            except DomainError:
+                                # Retain the original for review or correction of identity settings.
+                                pass
                     # Sidecar is durable before candidate DB commit, allowing orphan recovery on restart.
                     atomic_write(
                         self.cfg.root / "chunks" / f"{key}.candidate.json",
@@ -473,14 +508,16 @@ class Worker:
                 self.ingest(chunk["id"], self.cfg.root / chunk["output_path"])
             elif chunk["state"] == "submitted" and chunk["next_poll_at"] <= self.clock():
                 self.collect(chunk)
+        active = bool(chunks)
         for _ in range(self.cfg.max_external):
             cid = self.prepare()
             if not cid:
                 break
+            active = True
             self.submit(cid)
         from .export import process_export, sync_rejected
 
-        process_export(self.cfg)
+        exported = process_export(self.cfg)
         try:
             sync_rejected(self.cfg)
         except (DomainError, OSError, ValueError) as exc:
@@ -492,14 +529,17 @@ class Worker:
         from .character_references import sync_files
 
         try:
-            sync_files(self.cfg)
-            with transaction(self.cfg) as db:
-                db.execute("DELETE FROM system WHERE key='reference_sync_error'")
+            self.reference_stamp = sync_files(self.cfg, self.reference_stamp)
+            with self.cfg.write_lock(), connect(self.cfg) as db:
+                if db.execute("SELECT 1 FROM system WHERE key='reference_sync_error'").fetchone():
+                    db.execute("DELETE FROM system WHERE key='reference_sync_error'")
         except (DomainError, OSError, ValueError) as exc:
             with transaction(self.cfg) as db:
                 db.execute(
                     "INSERT OR REPLACE INTO system VALUES('reference_sync_error',?)", (type(exc).__name__,)
                 )
+
+        return active or bool(exported)
 
     def check_assets(self):
         with transaction(self.cfg) as db:
@@ -544,10 +584,10 @@ class Worker:
             reclaim_rejected(self.cfg)
             self.check_assets()
             while True:
-                self.tick()
+                active = self.tick()
                 if once:
                     break
-                stop.wait(0.25)
+                stop.wait(0.25 if active else self.cfg.idle_interval)
         finally:
             stop.set()
             thread.join(timeout=6)
